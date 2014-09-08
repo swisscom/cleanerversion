@@ -24,39 +24,21 @@ from unittest import skip
 from versions.models import Versionable, VersionedForeignKey, VersionedManyToManyField, get_utc_now
 
 
-def get_relation_table(model_class, fieldname):
-    field_object, model, direct, m2m = model_class._meta.get_field_by_name(fieldname)
-    if direct:
-        field = field_object
-    else:
-        field = field_object.field
-    return field.m2m_db_table()
-
-
 class Professor(Versionable):
     name = CharField(max_length=200)
     address = CharField(max_length=200)
     phone_number = CharField(max_length=200)
-
-    def __str__(self):
-        return self.name
 
 
 class Classroom(Versionable):
     name = CharField(max_length=200)
     building = CharField(max_length=200)
 
-    def __str__(self):
-        return self.name
-
 
 class Student(Versionable):
     name = CharField(max_length=200)
     professors = VersionedManyToManyField("Professor", related_name='students')
     classrooms = VersionedManyToManyField("Classroom", related_name='students')
-
-    def __str__(self):
-        return self.name
 
 
 class MultiM2MTest(TestCase):

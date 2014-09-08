@@ -14,14 +14,14 @@
 
 import copy
 import datetime
-from django.core.exceptions import SuspiciousOperation
+from django.core.exceptions import SuspiciousOperation, MultipleObjectsReturned, ObjectDoesNotExist
 
-from django.db.models import Q, LOOKUP_SEP
+from django.db.models import Q
 from django.db.models.fields import FieldDoesNotExist
 from django.db.models.fields.related import ForeignKey, ReverseSingleRelatedObjectDescriptor, \
     ReverseManyRelatedObjectsDescriptor, ManyToManyField, ManyRelatedObjectsDescriptor, create_many_related_manager, \
     ForeignRelatedObjectsDescriptor
-from django.db.models.query import QuerySet
+from django.db.models.query import QuerySet, ValuesListQuerySet
 from django.db.models.signals import post_init
 from django.utils.functional import cached_property
 from django.utils.timezone import utc
@@ -60,9 +60,18 @@ class VersionManager(models.Manager):
         if object.version_end_date == None:
             return object
         else:
-            return self.filter(
-                Q(identity=object.identity),
-                Q(version_start_date=object.version_end_date)).first()
+            try:
+                next = self.get(
+                    Q(identity=object.identity),
+                    Q(version_start_date=object.version_end_date))
+            except MultipleObjectsReturned as e:
+                raise MultipleObjectsReturned(
+                    "next_version couldn't uniquely identify the next version of object " + str(
+                        object.identity) + " to be returned\n" + str(e))
+            except ObjectDoesNotExist as e:
+                raise ObjectDoesNotExist(
+                    "next_version couldn't find a next version of object " + str(object.identity) + "\n" + str(e))
+            return next
 
     def previous_version(self, object):
         """
@@ -71,13 +80,22 @@ class VersionManager(models.Manager):
         """
         if object.version_birth_date == object.version_start_date:
             return object
-
-        if object.version_end_date is None:
-            return self.filter(identity=object.identity).exclude(version_end_date__isnull=True).order_by(
-                '-version_end_date').first()
         else:
-            return self.filter(identity=object.identity, version_end_date__lt=object.version_end_date) \
-                .order_by('-version_end_date').first()
+            try:
+                previous = self.get(
+                    Q(identity=object.identity),
+                    Q(version_end_date=object.version_start_date))
+            except MultipleObjectsReturned as e:
+                raise MultipleObjectsReturned(
+                    "pervious_version couldn't uniquely identify the previous version of object " + str(
+                        object.identity) + " to be returned\n" + str(e))
+            # This should never-ever happen, since going prior a first version of an object should be avoided by the
+            # first test of this method
+            except ObjectDoesNotExist as e:
+                raise ObjectDoesNotExist(
+                    "pervious_version couldn't find a previous version of object " + str(object.identity) + "\n" + str(
+                        e))
+            return previous
 
     def current_version(self, object):
         """
@@ -131,12 +149,6 @@ class VersionedQuerySet(QuerySet):
 
     query_time = None
 
-    def __init__(self, model=None, query=None, using=None):
-        super(VersionedQuerySet, self).__init__(model, query, using)
-
-        self.related_table_in_filter = set()
-        """We will store in it all the tables we have being using in while filtering."""
-
     def __getitem__(self, k):
         """
         Overrides the QuerySet.__getitem__ magic method for retrieving a list-item out of a query set.
@@ -158,12 +170,13 @@ class VersionedQuerySet(QuerySet):
         """
         if self._result_cache is None:
             self._result_cache = list(self.iterator())
-            for x in self._result_cache:
-                self._set_query_time(x)
+            if not isinstance(self, ValuesListQuerySet):
+                for x in self._result_cache:
+                    self._set_query_time(x)
         if self._prefetch_related_lookups and not self._prefetch_done:
             self._prefetch_related_objects()
 
-    def _clone(self, **kwargs):
+    def _clone(self, *args, **kwargs):
         """
         Overrides the QuerySet._clone method by adding the cloning of the VersionedQuerySet's query_time parameter
         :param kwargs: Same as the original QuerySet._clone params
@@ -171,8 +184,6 @@ class VersionedQuerySet(QuerySet):
         """
         clone = super(VersionedQuerySet, self)._clone(**kwargs)
         clone.query_time = self.query_time
-        clone.related_table_in_filter = self.related_table_in_filter
-
         return clone
 
     def _set_query_time(self, item, type_check=True):
@@ -186,6 +197,8 @@ class VersionedQuerySet(QuerySet):
             self.query_time = get_utc_now()
         if isinstance(item, Versionable):
             item.as_of = self.query_time
+        elif isinstance(item, VersionedQuerySet):
+            item.query_time = self.query_time
         else:
             if type_check:
                 raise TypeError("This item is not a Versionable, it's a " + str(type(item)))
@@ -221,69 +234,40 @@ class VersionedQuerySet(QuerySet):
             return self.set_as_of()
         return self.query_time
 
-    def propagate_querytime(self, relation_table=None):
+    def relation_as_of(self, relation_table):
         """
-        Propagate the query_time information found on the VersionedQuerySet
-        object to the given table or on table on which we have filtered on.
-
-        When relation_table is given it will be used and a clause will be
-        added to the generated query so that the matching object found on the
-        given relation_table will be restricted to the query_time specified
-        on the QuerySet. This usage is only use in the VersionManyRelatedManager.
-
-        When relation_table is not given then the function will use the list
-        of table we have build while using the filter(). Every time we
-        use filter() to filter on the other side of a relation we gather the tables
-        on which we have filtered (see _filter_or_exclude()). This list is then
-        used by propagate_querytime() to add to the QuerySet where clauses
-        restricting the matching records to the one that were active at the
-        query_time specified on the QuerySet.
-
+        Adds a clause to the query which limits the records on the given table
+        to those valid as of this query's as_of time.
+        The relation_table must already exist in the query; this method does not add
+        it.
         :param relation_table: name of table to apply the limit on.
         """
-        if relation_table:
-            relation_tables = [relation_table]
-        else:
-            relation_tables = self.related_table_in_filter
-
         query_time = self.get_query_time()
-        where_clauses = []
-        params = []
-        for relation_table in relation_tables:
-            where_clauses.append(
-                "{0}.version_end_date > %s OR {1}.version_end_date is NULL".format(relation_table, relation_table))
-            where_clauses.append("{0}.version_start_date <= %s".format(relation_table))
-            params.append(query_time)
-            params.append(query_time)
-
-        return self.extra(where=where_clauses, params=params)
+        return self.extra(where=[
+            "{0}.version_end_date > %s OR {1}.version_end_date is NULL".format(relation_table, relation_table),
+            "{0}.version_start_date <= %s".format(relation_table)
+        ], params=[query_time, query_time])
 
     def _filter_or_exclude(self, negate, *args, **kwargs):
         queryset = super(VersionedQuerySet, self)._filter_or_exclude(negate, *args, **kwargs)
-        instance = self.model
-        for filter_expression in kwargs:
-            for attr in filter_expression.split(LOOKUP_SEP)[:-1]:
-                try:
-                    field_object, model, direct, m2m = instance._meta.get_field_by_name(attr)
-
-                    # This is a one-to-many field (e.g player-set)
-                    if not direct:
-                        table_name = field_object.model._meta.db_table
-                        queryset.related_table_in_filter.add(table_name)
-
-                    if m2m:
-                        if isinstance(field_object, VersionedManyToManyField):
-                            table_name = field_object.m2m_db_table()
-                        else:
-                            table_name = field_object.field.m2m_db_table()
-
-                        queryset.related_table_in_filter.add(table_name)
-
-                except FieldDoesNotExist:
-                    # Of course in some occasion the filed might not be found,
-                    # that's accepted
-                    pass
-
+        # TODO: Implement version-awareness when filtering by related objects (e.g. Professor.objects.as_of(self.t4).filter(students__name='Benny'))
+        # instance = self.model
+        # relation_set = set()
+        # for filter_expression in kwargs:
+        # for attr in filter_expression.split(LOOKUP_SEP):
+        # # Check whether the attributes exists
+        # if hasattr(instance, attr):
+        # attr_obj = getattr(instance, attr)
+        # # Check whether the attribute is a M2M relation
+        # if isinstance(attr_obj, VersionedManyRelatedObjectsDescriptor):
+        # relation_set = set(attr_obj.field.rel.through.objects.as_of(self.query_time).values_list('pk'))
+        # queryset = super(VersionedQuerySet, queryset)._filter_or_exclude(False, **{'pk__in': list(relation_set)})
+        # instance = attr_obj.field.model
+        # elif isinstance(attr_obj, VersionedReverseManyRelatedObjectsDescriptor):
+        # #TODO: take the necessary steps for reverse relationships
+        #                 relation_set = set(attr_obj.field.rel.through.objects.as_of(self.query_time).values_list('pk'))
+        #                 queryset = super(VersionedQuerySet, queryset)._filter_or_exclude(False, **{attr_obj.field._m2m_reverse_name_cache + '__in': list(relation_set)})
+        #                 instance = attr_obj.field.rel.to
         return queryset
 
 
@@ -487,7 +471,7 @@ def create_versioned_many_related_manager(superclass, rel):
             if self.instance.as_of is not None:
                 queryset = queryset.as_of(self.instance.as_of)
 
-            return queryset.propagate_querytime(self.through._meta.db_table)
+            return queryset.relation_as_of(self.through._meta.db_table)
 
         def _remove_items(self, source_field_name, target_field_name, *objs):
             """
@@ -505,12 +489,21 @@ def create_versioned_many_related_manager(superclass, rel):
                 old_ids = set()
                 for obj in objs:
                     if isinstance(obj, self.model):
-                        old_ids.add(self._get_fk_val(obj, target_field_name))
+                        # The Django 1.7-way is preferred
+                        if hasattr(self, 'target_field'):
+                            fk_val = self.target_field.get_foreign_related_value(obj)[0]
+                        # But the Django 1.6.x -way is supported for backward compatibility
+                        elif hasattr(self, '_get_fk_val'):
+                            fk_val = self._get_fk_val(obj, target_field_name)
+                        else:
+                            raise TypeError("We couldn't find the value of the foreign key, this might be due to the "
+                                            "use of an unsupported version of Django")
+                        old_ids.add(fk_val)
                     else:
                         old_ids.add(obj)
                 db = router.db_for_write(self.through, instance=self.instance)
                 qs = self.through._default_manager.using(db).filter(**{
-                    source_field_name: self._fk_val,
+                    source_field_name: self.instance.id,
                     '%s__in' % target_field_name: old_ids
                 }).as_of(timestamp)
                 for relation in qs:
@@ -617,7 +610,6 @@ class VersionedManyRelatedObjectsDescriptor(ManyRelatedObjectsDescriptor):
 class Versionable(models.Model):
     """
     This is pretty much the central point for versioning objects.
-    The initial source was taken from DirtyVersion (https://github.com/cordmata/dirtyversion) by Matt Cordial (cordmata)
     """
 
     #: id stands for ID and is the primary key; sometimes also referenced as the surrogate key
@@ -632,7 +624,7 @@ class Versionable(models.Model):
 
     #: version_end_date, if set, points the moment in time, when the entry was duplicated (ie. the entry was cloned). It
     #: points therefore the end of a clone's validity period
-    version_end_date = models.DateTimeField(null=True, default=None)
+    version_end_date = models.DateTimeField(null=True, default=None, blank=True)
 
     #: version_birth_date contains the timestamp pointing to when the versionable has been created (independent of any
     #: version); This timestamp is bound to an identity
