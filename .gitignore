@@ -1,0 +1,24 @@
+# Ignore Python noise
+*.pyo
+*.pyc
+
+# Ignore IDE settings
+.idea
+
+# Ignore Vagrant stuff
+.vagrant/*
+Vagrantfile
+
+# Ignore proprietary docs, everything will be ported to README
+docs/*
+
+# Ignore stuff related to building and publishing the package
+dist/*
+build/*
+*.egg-info
+
+# local.py imports base.py and defines Django-variables BASE_DIR and INSTALLED_APPS
+cleanerversion/settings/local.py
+
+# dev_no_debug.py imports local.py and disables Django-debugging
+cleanerversion/settings/dev_no_debug.py

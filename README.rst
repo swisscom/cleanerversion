@@ -37,12 +37,21 @@ Prerequisites
 This code was tested with the following technical components
 
 * Python 2.7
-* Django 1.6
-* PostgreSQL 9.3.4
+* Django 1.6 & 1.7
+* PostgreSQL 9.3.4 & SQLite3
 
 
 Quick Start
 ===========
+
+Installation
+------------
+
+If you don't like to work with the sources directly, you can also install the `CleanerVersion package from PyPI
+<https://pypi.python.org/pypi/CleanerVersion>`_ by doing so (you may need superuser privileges, as for every other
+pip-installation)::
+
+    pip install cleanerversion
 
 Once you have your Django project in place, and the CleanerVersion app installed and registered, create your models as
 follows.
@@ -63,7 +72,7 @@ would be a working example, if place in the same source file. Here's how::
         address = CharField(max_length=200)
         phone = CharField(max_length=200)
 
-Assuming you know how to deal with :mod:`Django Models <django.db.models>` (you will need to sync your DB before your
+Assuming you know how to deal with `Django Models <https://docs.djangoproject.com/en/dev/topics/db/models/>`_ (you will need to sync your DB before your
 code gets usable; Or you're only testing, then that step is done by Django), the next step is using your model to create
 some entries::
 
