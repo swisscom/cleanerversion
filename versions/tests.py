@@ -24,15 +24,30 @@ from unittest import skip
 from versions.models import Versionable, VersionedForeignKey, VersionedManyToManyField, get_utc_now
 
 
+def get_relation_table(model_class, fieldname):
+    field_object, model, direct, m2m = model_class._meta.get_field_by_name(fieldname)
+    if direct:
+        field = field_object
+    else:
+        field = field_object.field
+    return field.m2m_db_table()
+
+
 class Professor(Versionable):
     name = CharField(max_length=200)
     address = CharField(max_length=200)
     phone_number = CharField(max_length=200)
 
+    def __str__(self):
+        return self.name
+
 
 class Classroom(Versionable):
     name = CharField(max_length=200)
     building = CharField(max_length=200)
+
+    def __str__(self):
+        return self.name
 
 
 class Student(Versionable):
@@ -40,6 +55,8 @@ class Student(Versionable):
     professors = VersionedManyToManyField("Professor", related_name='students')
     classrooms = VersionedManyToManyField("Classroom", related_name='students')
 
+    def __str__(self):
+        return self.name
 
 class MultiM2MTest(TestCase):
     """
@@ -181,34 +198,6 @@ class MultiM2MTest(TestCase):
         self.assertEqual(annikas_professors_t3.count(), 3)
         self.assertIn('Mr. Evans', list(annikas_professors_t3.values_list('name', flat=True)))
 
-    @skip("Filtering by a related objects properties does not work yet")
-    def test_t4(self):
-        benny = Student.objects.get(name='Benny')
-        teachers_all = Professor.objects.filter(students__name='Benny')
-        # print str(list(teachers_all))
-        # for t in teachers_all:
-        # print "Name " + t.name
-        # print "Address " + t.address
-        # print "Created " + str(t.version_birth_date)
-        # print "Version " + str(t.version_start_date)
-        # print "Cloned " + str(t.version_end_date)
-        # When explicitely filtering for relations, everything is fine
-        rels = Professor.students.related.field.rel.through.objects.as_of(self.t4).filter(
-            **{'student': benny.id}).values()
-        # print "Relations found: " + str(len(rels))
-        # for rel in rels:
-        # print str(rel)
-        # When relations are implicit, things get complicated
-        teachers_t4 = Professor.objects.as_of(self.t4).filter(students__name='Benny')
-        # print str(list(teachers_t4))
-        # for t in teachers_t4:
-        # print "Name " + t.name
-        # print "Address " + t.address
-        # print "Created " + str(t.version_birth_date)
-        # print "Version " + str(t.version_start_date)
-        # print "Cloned " + str(t.version_end_date)
-        self.assertEqual(Professor.objects.as_of(self.t4).filter(students__name='Benny').count(), 0)
-
     def test_number_of_queries_stay_constant(self):
         """
         We had a situation where the number of queries to get data from a m2m relations
@@ -273,6 +262,17 @@ class MultiM2MToSameTest(TestCase):
         erika.science_teachers.remove(ms_mayer)
 
         self.t3 = get_utc_now()
+
+    def test_filtering_on_the_other_side_of_relation(self):
+
+        language_pupils_count = Pupil.objects.as_of(self.t0).filter(language_teachers__name='Ms. Sue').propagate_querytime().count()
+        self.assertEqual(0, language_pupils_count)
+
+        language_pupils_count = Pupil.objects.as_of(self.t1).filter(language_teachers__name='Ms. Sue').propagate_querytime().count()
+        self.assertEqual(1, language_pupils_count)
+
+        language_pupils_count = Pupil.objects.as_of(self.t2).filter(language_teachers__name='Ms. Sue').propagate_querytime().count()
+        self.assertEqual(0, language_pupils_count)
 
     def test_t0(self):
         """
@@ -836,6 +836,65 @@ class OneToManyTest(TestCase):
         team_at_t3 = Team.objects.as_of(t3).first()
         self.assertEqual(2, team_at_t3.player_set.all().count())
 
+    def test_filtering_on_the_other_side_of_the_relation(self):
+        t1 = get_utc_now()
+        sleep(0.2)
+
+        p2 = Player.objects.get(name='p2.v1')
+        self.team.player_set.remove(p2)
+
+        t2 = get_utc_now()
+        sleep(0.2)
+
+        p1 = Player.objects.get(name='p1.v1')
+        self.team.player_set.remove(p1)
+
+        t3 = get_utc_now()
+        sleep(0.2)
+
+        # self.team.player_set.clear()
+        p1 = Player.objects.current.get(name='p1.v1')
+        p2 = Player.objects.current.get(name='p2.v1')
+        self.team.player_set.add(p1)
+        self.team.player_set.add(p2)
+
+        t4 = get_utc_now()
+
+        self.assertEqual(1, Team.objects.all().count())
+        self.assertEqual(1, Team.objects.as_of(t1).all().count())
+        self.assertEqual(3, Player.objects.filter(name='p1.v1').all().count())
+        self.assertEqual(3, Player.objects.filter(name='p2.v1').all().count())
+        self.assertEqual(1, Player.objects.as_of(t1).filter(name='p1.v1').all().count())
+        self.assertEqual(1, Player.objects.as_of(t1).filter(name='p2.v1').all().count())
+
+        # at t1 there should be no players in team
+        p1 = Team.objects.as_of(t1).filter(player__name='p1.v1').propagate_querytime().first()
+        self.assertIsNotNone(p1)
+        p2 = Team.objects.as_of(t1).filter(player__name='p2.v1').propagate_querytime().first()
+        self.assertIsNotNone(p2)
+
+
+        p2 = Team.objects.as_of(t1).filter(player__name='p2.v1').propagate_querytime().first()
+        self.assertIsNotNone(p2)
+
+        # at t2 there should be one player in team: p1.v1
+        p1 = Team.objects.as_of(t2).filter(player__name='p1.v1').propagate_querytime().first()
+        p2 = Team.objects.as_of(t2).filter(player__name='p2.v1').propagate_querytime().first()
+        self.assertIsNotNone(p1)
+        self.assertIsNone(p2)
+
+        # at t3 there should be no players in team
+        p1 = Team.objects.as_of(t3).filter(player__name='p1.v1').propagate_querytime().first()
+        p2 = Team.objects.as_of(t3).filter(player__name='p2.v1').propagate_querytime().first()
+        self.assertIsNone(p1)
+        self.assertIsNone(p2)
+
+        # at t4 there should be no players in team
+        p1 = Team.objects.as_of(t4).filter(player__name='p1.v1').first()
+        p2 = Team.objects.as_of(t4).filter(player__name='p2.v1').first()
+        self.assertIsNotNone(p1)
+        self.assertIsNotNone(p2)
+
 
 class Directory(Versionable):
     name = CharField(max_length=100)
@@ -972,4 +1031,155 @@ class SelfOneToManyTest(TestCase):
         # there should be 2 directories in the parent directory at time t3
         parentdir_at_t3 = Directory.objects.as_of(t3).get(name__startswith='parent')
         self.assertEqual(2, parentdir_at_t3.directory_set.all().count())
+
+
+class C1(Versionable):
+    name = CharField(max_length=50)
+    c2s = VersionedManyToManyField("C2", related_name='c1s')
+
+
+class C2(Versionable):
+    name = CharField(max_length=50)
+    c3s = VersionedManyToManyField("C3", related_name='c2s')
+
+
+class C3(Versionable):
+    name = CharField(max_length=50)
+
+
+class ManyToManyFilteringTest(TestCase):
+    def setUp(self):
+        c1 = C1(name='c1.v1')
+        c2 = C2(name='c2.v1')
+        c3 = C3(name='c3.v1')
+
+        c1.save()
+        c2.save()
+        c3.save()
+
+        c2.c3s.add(c3)
+        c1.c2s.add(c2)
+
+        self.t1 = get_utc_now()
+        sleep(0.2)
+
+        c3a = C3(name='c3a.v1')
+        c3a.save()
+        c2.c3s.add(c3a)
+
+        sleep(0.2)
+        self.t2 = get_utc_now()
+
+    def test_filtering_one_jump(self):
+        """
+        Test filtering m2m relations with 2 models
+        """
+        should_be_c1 = C1.objects.filter(c2s__name__startswith='c2').first()
+        self.assertIsNotNone(should_be_c1)
+
+    def test_filtering_one_jump_with_version_at_t1(self):
+        """
+        Test filtering m2m relations with 2 models with propagation of querytime
+        information across all tables
+        """
+        should_be_c1 = C1.objects.as_of(self.t1)\
+            .filter(c2s__name__startswith='c2').propagate_querytime().first()
+        self.assertIsNotNone(should_be_c1)
+
+    def test_filtering_one_jump_reverse(self):
+        """
+        Test filtering m2m relations with 2 models but navigating relation in the
+        reverse direction
+        """
+        should_be_c3 = C3.objects.filter(c2s__name__startswith='c2').first()
+        self.assertIsNotNone(should_be_c3)
+
+    def test_filtering_one_jump_reverse_with_version_at_t1(self):
+        """
+        Test filtering m2m relations with 2 models with propagation of querytime
+        information across all tables and navigating the relation in the reverse
+        direction
+        """
+        should_be_c3 = C3.objects.as_of(self.t1)\
+            .filter(c2s__name__startswith='c2').propagate_querytime().first()
+        self.assertIsNotNone(should_be_c3)
+        self.assertEqual(should_be_c3.name, 'c3.v1')
+
+    def test_filtering_two_jumps(self):
+        """
+        Test filtering m2m relations with 3 models
+        """
+        with self.assertNumQueries(1) as counter:
+            should_be_c1 = C1.objects.filter(c2s__c3s__name__startswith='c3').first()
+            self.assertIsNotNone(should_be_c1)
+
+    def test_filtering_two_jumps_with_version_at_t1(self):
+        """
+        Test filtering m2m relations with 3 models with propagation of querytime
+        information across all tables
+        """
+        with self.assertNumQueries(2) as counter:
+            should_be_c1 = C1.objects.as_of(self.t1)\
+                .filter(c2s__c3s__name__startswith='c3').propagate_querytime().first()
+            self.assertIsNotNone(should_be_c1)
+            self.assertEqual(should_be_c1.name, 'c1.v1')
+
+            count = C1.objects.as_of(self.t1)\
+                .filter(c2s__c3s__name__startswith='c3').propagate_querytime().all().count()
+            self.assertEqual(1, count)
+
+    def test_filtering_two_jumps_with_version_at_t2(self):
+        """
+        Test filtering m2m relations with 3 models with propagation of querytime
+        information across all tables but this time at point in time t2
+        """
+        with self.assertNumQueries(2) as counter:
+            should_be_c1 = C1.objects.as_of(self.t2)\
+                .filter(c2s__c3s__name__startswith='c3a').propagate_querytime().first()
+            self.assertIsNotNone(should_be_c1)
+
+            count = C1.objects.as_of(self.t2)\
+                .filter(c2s__c3s__name__startswith='c3').propagate_querytime().all().count()
+            self.assertEqual(2, count)
+
+    def test_filtering_two_jumps_reverse(self):
+        """
+        Test filtering m2m relations with 3 models but navigating relation in the
+        reverse direction
+        """
+        with self.assertNumQueries(1) as counter:
+            should_be_c3 = C3.objects.filter(c2s__c1s__name__startswith='c1').first()
+            self.assertIsNotNone(should_be_c3)
+
+    def test_filtering_two_jumps_reverse_with_version_at_t1(self):
+        """
+        Test filtering m2m relations with 3 models with propagation of querytime
+        information across all tables and navigating the relation in the reverse
+        direction
+        """
+        with self.assertNumQueries(2) as counter:
+            should_be_c3 = C3.objects.as_of(self.t1).\
+                filter(c2s__c1s__name__startswith='c1').propagate_querytime().first()
+            self.assertIsNotNone(should_be_c3)
+            self.assertEqual(should_be_c3.name, 'c3.v1')
+
+            count = C3.objects.as_of(self.t1)\
+                .filter(c2s__c1s__name__startswith='c1').propagate_querytime().all().count()
+            self.assertEqual(1, count)
+
+    def test_filtering_two_jumps_reverse_with_version_at_t2(self):
+        """
+        Test filtering m2m relations with 3 models with propagation of querytime
+        information across all tables and navigating the relation in the reverse
+        direction but this time at point in time t2
+        """
+        with self.assertNumQueries(2) as counter:
+            should_be_c3 = C3.objects.as_of(self.t2)\
+                .filter(c2s__c1s__name__startswith='c1').propagate_querytime().first()
+            self.assertIsNotNone(should_be_c3)
+
+            count = C3.objects.as_of(self.t2)\
+                .filter(c2s__c1s__name__startswith='c1').propagate_querytime().all().count()
+            self.assertEqual(2, count)
+
 

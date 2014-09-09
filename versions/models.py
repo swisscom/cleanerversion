@@ -14,7 +14,9 @@
 
 import copy
 import datetime
+from django import VERSION
 from django.core.exceptions import SuspiciousOperation, MultipleObjectsReturned, ObjectDoesNotExist
+from django.db.models.constants import LOOKUP_SEP
 
 from django.db.models import Q
 from django.db.models.fields import FieldDoesNotExist
@@ -149,6 +151,15 @@ class VersionedQuerySet(QuerySet):
 
     query_time = None
 
+    def __init__(self, model=None, query=None, using=None, hints=None):
+        if VERSION >= (1, 7): # Ensure the correct constructor for Django >= v1.7
+            super(VersionedQuerySet, self).__init__(model, query, using, hints)
+        else: # For Django 1.6, take the former constructor
+            super(VersionedQuerySet, self).__init__(model, query, using)
+
+        self.related_table_in_filter = set()
+        """We will store in it all the tables we have being using in while filtering."""
+
     def __getitem__(self, k):
         """
         Overrides the QuerySet.__getitem__ magic method for retrieving a list-item out of a query set.
@@ -184,6 +195,8 @@ class VersionedQuerySet(QuerySet):
         """
         clone = super(VersionedQuerySet, self)._clone(**kwargs)
         clone.query_time = self.query_time
+        clone.related_table_in_filter = self.related_table_in_filter
+
         return clone
 
     def _set_query_time(self, item, type_check=True):
@@ -234,36 +247,107 @@ class VersionedQuerySet(QuerySet):
             return self.set_as_of()
         return self.query_time
 
-    def relation_as_of(self, relation_table):
+    def propagate_querytime(self, relation_table=None):
         """
-        Adds a clause to the query which limits the records on the given table
-        to those valid as of this query's as_of time.
-        The relation_table must already exist in the query; this method does not add
-        it.
+        Propagate the query_time information found on the VersionedQuerySet
+        object to the given table or on table on which we have filtered on.
+
+        When relation_table is given it will be used and a clause will be
+        added to the generated query so that the matching object found on the
+        given relation_table will be restricted to the query_time specified
+        on the QuerySet. This usage is only use in the VersionManyRelatedManager.
+
+        When relation_table is not given then the function will use the list
+        of table we have build while using the filter(). Every time we
+        use filter() to filter on the other side of a relation we gather the tables
+        on which we have filtered (see _filter_or_exclude()). This list is then
+        used by propagate_querytime() to add to the QuerySet where clauses
+        restricting the matching records to the one that were active at the
+        query_time specified on the QuerySet.
+
         :param relation_table: name of table to apply the limit on.
         """
+        if relation_table:
+            relation_tables = [relation_table]
+        else:
+            relation_tables = self.related_table_in_filter
+
         query_time = self.get_query_time()
-        return self.extra(where=[
-            "{0}.version_end_date > %s OR {1}.version_end_date is NULL".format(relation_table, relation_table),
-            "{0}.version_start_date <= %s".format(relation_table)
-        ], params=[query_time, query_time])
+        where_clauses = []
+        params = []
+        for relation_table in relation_tables:
+            where_clauses.append(
+                "{0}.version_end_date > %s OR {1}.version_end_date is NULL".format(relation_table, relation_table))
+            where_clauses.append("{0}.version_start_date <= %s".format(relation_table))
+            params.append(query_time)
+            params.append(query_time)
+
+        return self.extra(where=where_clauses, params=params)
 
     def _filter_or_exclude(self, negate, *args, **kwargs):
         queryset = super(VersionedQuerySet, self)._filter_or_exclude(negate, *args, **kwargs)
-        # TODO: Implement version-awareness when filtering by related objects (e.g. Professor.objects.as_of(self.t4).filter(students__name='Benny'))
-        # instance = self.model
-        # relation_set = set()
-        # for filter_expression in kwargs:
-        # for attr in filter_expression.split(LOOKUP_SEP):
-        # # Check whether the attributes exists
-        # if hasattr(instance, attr):
-        # attr_obj = getattr(instance, attr)
-        # # Check whether the attribute is a M2M relation
-        # if isinstance(attr_obj, VersionedManyRelatedObjectsDescriptor):
-        # relation_set = set(attr_obj.field.rel.through.objects.as_of(self.query_time).values_list('pk'))
-        # queryset = super(VersionedQuerySet, queryset)._filter_or_exclude(False, **{'pk__in': list(relation_set)})
-        # instance = attr_obj.field.model
-        # elif isinstance(attr_obj, VersionedReverseManyRelatedObjectsDescriptor):
+        model_class = self.model
+
+        def path_stack_to_tables(model_class, paths_stack, tables=None):
+            """
+            Recursive function that will navigate the tables found in 'paths_stack'
+            and build up a list of all the tables we have visited.
+
+            The found tables are gathered in the collector variable 'tables' which
+            is initially empty on the first call.
+
+            On each recursive call we pop from 'paths_stack' until there is no more
+            tables to navigate.
+
+            The 'paths_stack' is created by exploding a filter expression on the
+            lookup separator, dropping the last item of the expression and then
+            reversing the obtained list.
+
+            Example:
+                filter expression: student__professor__name__startswith
+                after exploding: ['student', 'professor', 'name']
+                paths_stack: ['name', 'professor', 'student']
+            """
+            if not tables:
+                tables = []
+
+            attribute = paths_stack.pop()
+            try:
+                field_object, model, direct, m2m = model_class._meta.get_field_by_name(attribute)
+
+                # This is the counter part of one-to-many field
+                if not direct:
+                    table_name = field_object.model._meta.db_table
+                    queryset.related_table_in_filter.add(table_name)
+
+                if m2m:
+                    if isinstance(field_object, VersionedManyToManyField):
+                        table_name = field_object.m2m_db_table()
+                    else:
+                        table_name = field_object.field.m2m_db_table()
+
+                    tables.append(table_name)
+
+            except FieldDoesNotExist:
+                # Of course in some occasion the filed might not be found,
+                # that's accepted
+                pass
+
+            if not paths_stack:
+                return tables
+            else:
+                if isinstance(field_object, VersionedManyToManyField):
+                    model_class = field_object.rel.to
+                else:
+                    model_class = field_object.model
+                return path_stack_to_tables(model_class, paths_stack, tables)
+
+        for filter_expression in kwargs:
+            paths_stack = list(reversed(filter_expression.split(LOOKUP_SEP)[:-1]))
+            if paths_stack:
+                tables = path_stack_to_tables(model_class, paths_stack)
+                queryset.related_table_in_filter = queryset.related_table_in_filter.union(tables)
+
         # #TODO: take the necessary steps for reverse relationships
         #                 relation_set = set(attr_obj.field.rel.through.objects.as_of(self.query_time).values_list('pk'))
         #                 queryset = super(VersionedQuerySet, queryset)._filter_or_exclude(False, **{attr_obj.field._m2m_reverse_name_cache + '__in': list(relation_set)})
@@ -471,7 +555,7 @@ def create_versioned_many_related_manager(superclass, rel):
             if self.instance.as_of is not None:
                 queryset = queryset.as_of(self.instance.as_of)
 
-            return queryset.relation_as_of(self.through._meta.db_table)
+            return queryset.propagate_querytime(self.through._meta.db_table)
 
         def _remove_items(self, source_field_name, target_field_name, *objs):
             """
@@ -644,7 +728,7 @@ class Versionable(models.Model):
     def delete(self, using=None):
         self._delete_at(get_utc_now(), using)
 
-    def _delete_at(self, datetime, using=None):
+    def _delete_at(self, timestamp, using=None):
         """
         WARNING: This method if only for internal use, it should not be used
         from outside.
@@ -656,8 +740,8 @@ class Versionable(models.Model):
         a random deletion date of your liking.
         """
         if self.version_end_date is None:
-            self.version_end_date = datetime
-            self.save()
+            self.version_end_date = timestamp
+            self.save(using=using)
         else:
             raise Exception('Cannot delete anything else but the current version')
 
