@@ -53,8 +53,22 @@ pip-installation)::
 
     pip install cleanerversion
 
-Once you have your Django project in place, and the CleanerVersion app installed and registered, create your models as
-follows.
+Once you have your Django project in place, register CleanerVersion to the ``INSTALLED_APPS`` variable by adding the 
+``versions`` keyword as follows::
+
+    INSTALLED_APPS = (
+        ...
+        'versions',
+        ...
+    )
+
+If you want to be sure, whether things work out correctly, run CleanerVersion's unittests from within your Django 
+project root::
+
+    python manage.py test versions
+
+If this terminates with a ``OK``, you're all set. Go on and create your models as follows.
+
 
 A simple versionable model
 --------------------------

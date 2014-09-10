@@ -4,6 +4,7 @@
 
 # Ignore IDE settings
 .idea
+*~
 
 # Ignore Vagrant stuff
 .vagrant/*
