@@ -375,10 +375,6 @@ class VersionedQuerySet(QuerySet):
                 tables = path_stack_to_tables(model_class, paths_stack)
                 queryset.related_table_in_filter = queryset.related_table_in_filter.union(tables)
 
-        # #TODO: take the necessary steps for reverse relationships
-        #                 relation_set = set(attr_obj.field.rel.through.objects.as_of(self.query_time).values_list('pk'))
-        #                 queryset = super(VersionedQuerySet, queryset)._filter_or_exclude(False, **{attr_obj.field._m2m_reverse_name_cache + '__in': list(relation_set)})
-        #                 instance = attr_obj.field.rel.to
         return queryset
 
 
