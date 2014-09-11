@@ -318,7 +318,7 @@ class VersionedQuerySet(QuerySet):
                 # This is the counter part of one-to-many field
                 if not direct:
                     table_name = field_object.model._meta.db_table
-                    queryset.related_table_in_filter.add(table_name)
+                    tables.append(table_name)
 
                 if m2m:
                     if isinstance(field_object, VersionedManyToManyField):
@@ -326,6 +326,10 @@ class VersionedQuerySet(QuerySet):
                     else:
                         table_name = field_object.field.m2m_db_table()
 
+                    tables.append(table_name)
+
+                if isinstance(field_object, VersionedForeignKey):
+                    table_name = field_object.rel.to._meta.db_table
                     tables.append(table_name)
 
             except FieldDoesNotExist:
@@ -336,22 +340,47 @@ class VersionedQuerySet(QuerySet):
             if not paths_stack:
                 return tables
             else:
-                if isinstance(field_object, VersionedManyToManyField):
+                if isinstance(field_object, VersionedManyToManyField)\
+                        or isinstance(field_object, VersionedForeignKey):
                     model_class = field_object.rel.to
                 else:
                     model_class = field_object.model
+
                 return path_stack_to_tables(model_class, paths_stack, tables)
 
-        for filter_expression in kwargs:
+        def flatten_Q(q, expressions):
+            """
+            Recursive function that flattens the tree of Q nodes into a list
+            of filtering expressions.
+
+            For each Q node we visit its children. If the children is a tuple
+            we have reach the bottom of the tree and we read the first element
+            of the tuple (which is the filtering expression). If the children
+            is a Q node we recursively walk down on it.
+            """
+            for c in q.children:
+                if isinstance(c, tuple):
+                    expressions.append(c[0])
+                else:
+                    e = flatten_Q(c, expressions)
+                    expressions.extend(e)
+                    return expressions
+
+            return expressions
+
+        filter_expression_list = []
+
+        for q in args:
+            filter_expression_list.extend(flatten_Q(q, []))
+
+        filter_expression_list.extend(list(kwargs))
+
+        for filter_expression in filter_expression_list:
             paths_stack = list(reversed(filter_expression.split(LOOKUP_SEP)[:-1]))
             if paths_stack:
                 tables = path_stack_to_tables(model_class, paths_stack)
                 queryset.related_table_in_filter = queryset.related_table_in_filter.union(tables)
 
-        # #TODO: take the necessary steps for reverse relationships
-        #                 relation_set = set(attr_obj.field.rel.through.objects.as_of(self.query_time).values_list('pk'))
-        #                 queryset = super(VersionedQuerySet, queryset)._filter_or_exclude(False, **{attr_obj.field._m2m_reverse_name_cache + '__in': list(relation_set)})
-        #                 instance = attr_obj.field.rel.to
         return queryset
 
 
