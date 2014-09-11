@@ -13,13 +13,13 @@
 # limitations under the License.
 
 from django.core.exceptions import SuspiciousOperation, ObjectDoesNotExist, MultipleObjectsReturned, ValidationError
+from django.db.models import Q
 from django.db.models.fields import CharField
 from django.test import TestCase
 import datetime
 from django.utils.timezone import utc
 from time import sleep
 import itertools
-from unittest import skip
 
 from versions.models import Versionable, VersionedForeignKey, VersionedManyToManyField, get_utc_now
 
@@ -57,6 +57,7 @@ class Student(Versionable):
 
     def __str__(self):
         return self.name
+
 
 class MultiM2MTest(TestCase):
     """
@@ -205,9 +206,9 @@ class MultiM2MTest(TestCase):
         object was related with 10 others it will require 2 + 2x10 queries to get data.
         Obviously this is not something one would want and this problem is really
         difficult to find out as the behavior is correct. There is just too many queries
-        generated to carry on the work and therefor the system performances sink.
+        generated to carry on the work and therefore the system's performance sinks.
         This test is here to make sure we don't go back accidentally to such a situation
-        by making sure the number of queries stay the same.
+        by making sure the number of queries stays the same.
         """
         annika = Student.objects.current.get(name='Annika')
         with self.assertNumQueries(1):
@@ -264,14 +265,16 @@ class MultiM2MToSameTest(TestCase):
         self.t3 = get_utc_now()
 
     def test_filtering_on_the_other_side_of_relation(self):
-
-        language_pupils_count = Pupil.objects.as_of(self.t0).filter(language_teachers__name='Ms. Sue').propagate_querytime().count()
+        language_pupils_count = Pupil.objects.as_of(self.t0).filter(
+            language_teachers__name='Ms. Sue').propagate_querytime().count()
         self.assertEqual(0, language_pupils_count)
 
-        language_pupils_count = Pupil.objects.as_of(self.t1).filter(language_teachers__name='Ms. Sue').propagate_querytime().count()
+        language_pupils_count = Pupil.objects.as_of(self.t1).filter(
+            language_teachers__name='Ms. Sue').propagate_querytime().count()
         self.assertEqual(1, language_pupils_count)
 
-        language_pupils_count = Pupil.objects.as_of(self.t2).filter(language_teachers__name='Ms. Sue').propagate_querytime().count()
+        language_pupils_count = Pupil.objects.as_of(self.t2).filter(
+            language_teachers__name='Ms. Sue').propagate_querytime().count()
         self.assertEqual(0, language_pupils_count)
 
     def test_t0(self):
@@ -838,21 +841,21 @@ class OneToManyTest(TestCase):
 
     def test_filtering_on_the_other_side_of_the_relation(self):
         t1 = get_utc_now()
-        sleep(0.2)
+        sleep(0.1)
 
         p2 = Player.objects.get(name='p2.v1')
         self.team.player_set.remove(p2)
 
         t2 = get_utc_now()
-        sleep(0.2)
+        sleep(0.1)
 
         p1 = Player.objects.get(name='p1.v1')
         self.team.player_set.remove(p1)
 
         t3 = get_utc_now()
-        sleep(0.2)
+        sleep(0.1)
 
-        # self.team.player_set.clear()
+        # Let's get those players back into the game!
         p1 = Player.objects.current.get(name='p1.v1')
         p2 = Player.objects.current.get(name='p2.v1')
         self.team.player_set.add(p1)
@@ -867,33 +870,54 @@ class OneToManyTest(TestCase):
         self.assertEqual(1, Player.objects.as_of(t1).filter(name='p1.v1').all().count())
         self.assertEqual(1, Player.objects.as_of(t1).filter(name='p2.v1').all().count())
 
-        # at t1 there should be no players in team
+        # at t1 there should be one team with two players
         p1 = Team.objects.as_of(t1).filter(player__name='p1.v1').propagate_querytime().first()
         self.assertIsNotNone(p1)
         p2 = Team.objects.as_of(t1).filter(player__name='p2.v1').propagate_querytime().first()
         self.assertIsNotNone(p2)
 
-
-        p2 = Team.objects.as_of(t1).filter(player__name='p2.v1').propagate_querytime().first()
-        self.assertIsNotNone(p2)
-
-        # at t2 there should be one player in team: p1.v1
+        # at t2 there should be one team with one single player called 'p1.v1'
         p1 = Team.objects.as_of(t2).filter(player__name='p1.v1').propagate_querytime().first()
         p2 = Team.objects.as_of(t2).filter(player__name='p2.v1').propagate_querytime().first()
         self.assertIsNotNone(p1)
         self.assertIsNone(p2)
 
-        # at t3 there should be no players in team
+        # at t3 there should be one team with no players
         p1 = Team.objects.as_of(t3).filter(player__name='p1.v1').propagate_querytime().first()
         p2 = Team.objects.as_of(t3).filter(player__name='p2.v1').propagate_querytime().first()
         self.assertIsNone(p1)
         self.assertIsNone(p2)
 
-        # at t4 there should be no players in team
+        # at t4 there should be one team with two players again!
         p1 = Team.objects.as_of(t4).filter(player__name='p1.v1').first()
         p2 = Team.objects.as_of(t4).filter(player__name='p2.v1').first()
         self.assertIsNotNone(p1)
         self.assertIsNotNone(p2)
+
+    def test_simple_filter_using_q_objects(self):
+        """
+        This tests explicitely the filtering of a versioned object using Q objects.
+        However, since this is done implicetly with every call to 'as_of', this test is redundant but is kept for
+        explicit test coverage
+        """
+        t1 = get_utc_now()
+        sleep(0.1)
+
+        p1 = Player.objects.current.get(name__startswith='p1')
+        self.team.player_set.remove(p1)
+
+        p1 = Player.objects.current.get(name__startswith='p1')
+        p1.name = 'p1.v2'
+        p1.save()
+
+        t2 = get_utc_now()
+        sleep(0.1)
+
+        t1_players = list(
+            Player.objects.as_of(t1).filter(Q(name__startswith='p1') | Q(name__startswith='p2')).values_list('name',
+                                                                                                             flat=True))
+        self.assertEqual(2, len(t1_players))
+        self.assertItemsEqual(t1_players, ['p1.v1', 'p2.v1'])
 
 
 class Directory(Versionable):
@@ -1082,7 +1106,7 @@ class ManyToManyFilteringTest(TestCase):
         Test filtering m2m relations with 2 models with propagation of querytime
         information across all tables
         """
-        should_be_c1 = C1.objects.as_of(self.t1)\
+        should_be_c1 = C1.objects.as_of(self.t1) \
             .filter(c2s__name__startswith='c2').propagate_querytime().first()
         self.assertIsNotNone(should_be_c1)
 
@@ -1100,7 +1124,7 @@ class ManyToManyFilteringTest(TestCase):
         information across all tables and navigating the relation in the reverse
         direction
         """
-        should_be_c3 = C3.objects.as_of(self.t1)\
+        should_be_c3 = C3.objects.as_of(self.t1) \
             .filter(c2s__name__startswith='c2').propagate_querytime().first()
         self.assertIsNotNone(should_be_c3)
         self.assertEqual(should_be_c3.name, 'c3.v1')
@@ -1119,12 +1143,12 @@ class ManyToManyFilteringTest(TestCase):
         information across all tables
         """
         with self.assertNumQueries(2) as counter:
-            should_be_c1 = C1.objects.as_of(self.t1)\
+            should_be_c1 = C1.objects.as_of(self.t1) \
                 .filter(c2s__c3s__name__startswith='c3').propagate_querytime().first()
             self.assertIsNotNone(should_be_c1)
             self.assertEqual(should_be_c1.name, 'c1.v1')
 
-            count = C1.objects.as_of(self.t1)\
+            count = C1.objects.as_of(self.t1) \
                 .filter(c2s__c3s__name__startswith='c3').propagate_querytime().all().count()
             self.assertEqual(1, count)
 
@@ -1134,11 +1158,11 @@ class ManyToManyFilteringTest(TestCase):
         information across all tables but this time at point in time t2
         """
         with self.assertNumQueries(2) as counter:
-            should_be_c1 = C1.objects.as_of(self.t2)\
+            should_be_c1 = C1.objects.as_of(self.t2) \
                 .filter(c2s__c3s__name__startswith='c3a').propagate_querytime().first()
             self.assertIsNotNone(should_be_c1)
 
-            count = C1.objects.as_of(self.t2)\
+            count = C1.objects.as_of(self.t2) \
                 .filter(c2s__c3s__name__startswith='c3').propagate_querytime().all().count()
             self.assertEqual(2, count)
 
@@ -1158,12 +1182,12 @@ class ManyToManyFilteringTest(TestCase):
         direction
         """
         with self.assertNumQueries(2) as counter:
-            should_be_c3 = C3.objects.as_of(self.t1).\
+            should_be_c3 = C3.objects.as_of(self.t1). \
                 filter(c2s__c1s__name__startswith='c1').propagate_querytime().first()
             self.assertIsNotNone(should_be_c3)
             self.assertEqual(should_be_c3.name, 'c3.v1')
 
-            count = C3.objects.as_of(self.t1)\
+            count = C3.objects.as_of(self.t1) \
                 .filter(c2s__c1s__name__startswith='c1').propagate_querytime().all().count()
             self.assertEqual(1, count)
 
@@ -1174,11 +1198,11 @@ class ManyToManyFilteringTest(TestCase):
         direction but this time at point in time t2
         """
         with self.assertNumQueries(2) as counter:
-            should_be_c3 = C3.objects.as_of(self.t2)\
+            should_be_c3 = C3.objects.as_of(self.t2) \
                 .filter(c2s__c1s__name__startswith='c1').propagate_querytime().first()
             self.assertIsNotNone(should_be_c3)
 
-            count = C3.objects.as_of(self.t2)\
+            count = C3.objects.as_of(self.t2) \
                 .filter(c2s__c1s__name__startswith='c1').propagate_querytime().all().count()
             self.assertEqual(2, count)
 
