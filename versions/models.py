@@ -342,7 +342,34 @@ class VersionedQuerySet(QuerySet):
                     model_class = field_object.model
                 return path_stack_to_tables(model_class, paths_stack, tables)
 
-        for filter_expression in kwargs:
+        def flatten_Q(q, expressions):
+            """
+            Recursive function that flattens the tree of Q nodes into a list
+            of filtering expressions.
+
+            For each Q node we visit its children. If the children is a tuple
+            we have reach the bottom of the tree and we read the first element
+            of the tuple (which is the filtering expression). If the children
+            is a Q node we recursively walk down on it.
+            """
+            for c in q.children:
+                if isinstance(c, tuple):
+                    expressions.append(c[0])
+                else:
+                    e = flatten_Q(c, expressions)
+                    expressions.extend(e)
+                    return expressions
+
+            return expressions
+
+        filter_expression_list = []
+
+        for q in args:
+            filter_expression_list.extend(flatten_Q(q, []))
+
+        filter_expression_list.extend(list(kwargs))
+
+        for filter_expression in filter_expression_list:
             paths_stack = list(reversed(filter_expression.split(LOOKUP_SEP)[:-1]))
             if paths_stack:
                 tables = path_stack_to_tables(model_class, paths_stack)
