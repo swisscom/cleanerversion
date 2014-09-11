@@ -1,5 +1,18 @@
+"""
+Django settings for CleanerVersion project.
+
+For more information on this file, see
+https://docs.djangoproject.com/en/dev/topics/settings/
+
+For the full list of settings and their values, see
+https://docs.djangoproject.com/en/dev/ref/settings/
+"""
+
 from __future__ import absolute_import
 from django.utils.crypto import get_random_string
+import os
+
+BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)) + '/..')
 
 # SECURITY WARNING: keep the secret key used in production secret!
 chars = 'abcdefghijklmnopqrstuvwxyz0123456789!@#$%^&*(-_=+)'
@@ -23,6 +36,11 @@ DATABASES = {
         'PORT': '',
     }
 }
+
+# Application definition
+INSTALLED_APPS = (
+    'versions',
+)
 
 # Internationalization
 # https://docs.djangoproject.com/en/dev/topics/i18n/

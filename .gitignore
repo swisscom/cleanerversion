@@ -18,8 +18,5 @@ dist/*
 build/*
 *.egg-info
 
-# local.py imports base.py and defines Django-variables BASE_DIR and INSTALLED_APPS
-cleanerversion/settings/local.py
-
 # dev_no_debug.py imports local.py and disables Django-debugging
 cleanerversion/settings/dev_no_debug.py
