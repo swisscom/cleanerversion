@@ -318,7 +318,7 @@ class VersionedQuerySet(QuerySet):
                 # This is the counter part of one-to-many field
                 if not direct:
                     table_name = field_object.model._meta.db_table
-                    queryset.related_table_in_filter.add(table_name)
+                    tables.append(table_name)
 
                 if m2m:
                     if isinstance(field_object, VersionedManyToManyField):
@@ -326,6 +326,10 @@ class VersionedQuerySet(QuerySet):
                     else:
                         table_name = field_object.field.m2m_db_table()
 
+                    tables.append(table_name)
+
+                if isinstance(field_object, VersionedForeignKey):
+                    table_name = field_object.rel.to._meta.db_table
                     tables.append(table_name)
 
             except FieldDoesNotExist:
@@ -336,10 +340,12 @@ class VersionedQuerySet(QuerySet):
             if not paths_stack:
                 return tables
             else:
-                if isinstance(field_object, VersionedManyToManyField):
+                if isinstance(field_object, VersionedManyToManyField)\
+                        or isinstance(field_object, VersionedForeignKey):
                     model_class = field_object.rel.to
                 else:
                     model_class = field_object.model
+
                 return path_stack_to_tables(model_class, paths_stack, tables)
 
         def flatten_Q(q, expressions):
