@@ -14,7 +14,6 @@
 
 import copy
 import datetime
-from django import VERSION
 from django.core.exceptions import SuspiciousOperation, MultipleObjectsReturned, ObjectDoesNotExist
 from django.db.models.constants import LOOKUP_SEP
 
@@ -151,11 +150,8 @@ class VersionedQuerySet(QuerySet):
 
     query_time = None
 
-    def __init__(self, model=None, query=None, using=None, hints=None):
-        if VERSION >= (1, 7): # Ensure the correct constructor for Django >= v1.7
-            super(VersionedQuerySet, self).__init__(model, query, using, hints)
-        else: # For Django 1.6, take the former constructor
-            super(VersionedQuerySet, self).__init__(model, query, using)
+    def __init__(self, *args, **kwargs):
+        super(VersionedQuerySet, self).__init__(*args, **kwargs)
 
         self.related_table_in_filter = set()
         """We will store in it all the tables we have being using in while filtering."""
