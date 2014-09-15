@@ -13,4 +13,4 @@ install:
   - pip install -q django==$DJANGO_VERSION
 
 # Run tests
-script: DJANGO_SETTINGS_MODULE=cleanerversion.settings.base ./manage.py test versions
+script: DJANGO_SETTINGS_MODULE=cleanerversion.settings.base python ./manage.py test versions
