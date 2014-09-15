@@ -1,0 +1,16 @@
+language: python
+python:
+  - "2.6"
+  - "2.7"
+  - "3.3"
+  - "3.4"
+env:
+  - DJANGO_VERSION=1.6.7
+  - DJANGO_VERSION=1.7
+
+# Dependencies
+install:
+  - pip install -q django==$DJANGO_VERSION
+
+# Run tests
+script: DJANGO_SETTINGS_MODULE=cleanerversion.settings.base ./manage.py test
