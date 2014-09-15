@@ -21,7 +21,7 @@ If you get errors, check the following things:
 """
 
 setup(name='CleanerVersion',
-      version='1.1.1',
+      version='1.1.2',
       description='A versioning solution for relational data models',
       long_description='CleanerVersion is a solution that allows you to read and write multiple versions of an entry '
                        'to and from your relational database. It allows to keep track of modifications on an object '
@@ -32,7 +32,7 @@ setup(name='CleanerVersion',
       author='Manuel Jeckelmann, Jean-Christophe Zulian, Brian King, Andrea Marcacci',
       author_email='engineering.sophia@swisscom.com',
       license='Apache License 2.0',
-      packages=['versions'],
+      packages=['versions', 'versions.util'],
       url='https://github.com/swisscom/cleanerversion',
       install_requires=['django'],
       classifiers=[

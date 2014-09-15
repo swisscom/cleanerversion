@@ -1,2 +1,3 @@
 include LICENSE*
 include NOTICE*
+global-exclude *.py[c|o]
