@@ -418,7 +418,7 @@ class VersionedManyToManyField(ManyToManyField):
         # - creating the through class if unset
         # - resolving the through class if it's a string
         # - resolving string references within the through class
-        if not self.rel.through and not cls._meta.abstract and not cls._meta.swapped:
+        if not self.rel.through and not cls._meta.abstract and not cls._meta.swapped and cls.__module__ != '__fake__':
             self.rel.through = VersionedManyToManyField.create_versioned_many_to_many_intermediary_model(self, cls,
                                                                                                          name)
         super(VersionedManyToManyField, self).contribute_to_class(cls, name)
