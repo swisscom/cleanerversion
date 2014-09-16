@@ -40,6 +40,7 @@ setup(name='CleanerVersion',
           'Framework :: Django',
           'Intended Audience :: Developers',
           'Programming Language :: Python :: 2.7',
+          'Programming Language :: Python :: 3.4',
           'Topic :: Database',
           'Topic :: System :: Archiving',
       ])
