@@ -18,6 +18,7 @@ from django.db.models.fields import CharField
 from django.test import TestCase
 import datetime
 from django.utils.timezone import utc
+import six
 from time import sleep
 import itertools
 
@@ -682,6 +683,11 @@ class Player(Versionable):
     name = CharField(max_length=200)
     team = VersionedForeignKey(Team, null=True)
 
+    def __str__(self):
+        return "<" + str(self.__class__.__name__) + " object: " + str(
+            self.name) + " {valid: [" + self.version_start_date.isoformat() + " | " + (
+                   self.version_end_date.isoformat() if self.version_end_date else "None") + "], created: " + self.version_birth_date.isoformat() + "}>"
+
 
 class OneToManyTest(TestCase):
     def setUp(self):
@@ -723,6 +729,7 @@ class OneToManyTest(TestCase):
         self.assertEqual(2, team_at_t2.player_set.count())
 
     def test_creating_new_version_of_the_player(self):
+        global filter
         t1 = get_utc_now()
         sleep(0.1)
 
@@ -739,13 +746,16 @@ class OneToManyTest(TestCase):
         team = Team.objects.as_of(t1).first()
         self.assertEqual(2, team.player_set.count())
         for player in team.player_set.all():
-            self.assertNotEqual(u'p1.v2', unicode(player.name))
+            self.assertNotEqual(u'p1.v2', six.u(str(player.name)))
 
         # at t2 there must be a 2 players and on of them is named 'p1.v2'
         team = Team.objects.as_of(t2).first()
         self.assertEqual(2, team.player_set.count())
 
-        matches = itertools.ifilter(lambda x: x.name == 'p1.v2', team.player_set.all())
+        if six.PY2:
+            matches = itertools.ifilter(lambda x: x.name == 'p1.v2', team.player_set.all())
+        if six.PY3:
+            matches = filter(lambda x: x.name == 'p1.v2', team.player_set.all())
         self.assertEqual(1, len(list(matches)))
 
     def test_adding_more_player_to_the_team(self):
@@ -917,7 +927,7 @@ class OneToManyTest(TestCase):
             Player.objects.as_of(t1).filter(Q(name__startswith='p1') | Q(name__startswith='p2')).values_list('name',
                                                                                                              flat=True))
         self.assertEqual(2, len(t1_players))
-        self.assertItemsEqual(t1_players, ['p1.v1', 'p2.v1'])
+        self.assertListEqual(sorted(t1_players), sorted(['p1.v1', 'p2.v1']))
 
 
 class Directory(Versionable):
@@ -992,7 +1002,10 @@ class SelfOneToManyTest(TestCase):
         self.assertEqual(2, parentdir_at_t2.directory_set.count())
 
         # ... and one of then is named 'subdir1.v2'
-        matches = itertools.ifilter(lambda x: x.name == 'subdir1.v2', parentdir_at_t2.directory_set.all())
+        if six.PY2:
+            matches = itertools.ifilter(lambda x: x.name == 'subdir1.v2', parentdir_at_t2.directory_set.all())
+        if six.PY3:
+            matches = filter(lambda x: x.name == 'subdir1.v2', parentdir_at_t2.directory_set.all())
         self.assertEqual(1, len(list(matches)))
 
     def test_adding_more_subdir(self):

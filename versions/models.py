@@ -130,7 +130,7 @@ class VersionManager(models.Manager):
         :param kwargs: arguments needed for initializing the instance
         :return: an instance of the class
         """
-        ident = unicode(uuid.uuid4())
+        ident = six.u(str(uuid.uuid4()))
         if timestamp is None:
             timestamp = get_utc_now()
         kwargs['id'] = ident
@@ -564,7 +564,7 @@ def create_versioned_many_related_manager(superclass, rel):
                 version_start_date_field = self.through._meta.get_field('version_start_date')
                 version_end_date_field = self.through._meta.get_field('version_end_date')
             except (FieldDoesNotExist) as e:
-                print str(e) + "; available fields are " + ", ".join(self.through._meta.get_all_field_names())
+                print(str(e) + "; available fields are " + ", ".join(self.through._meta.get_all_field_names()))
                 raise e
                 # FIXME: this probably does not work when auto-referencing
 
@@ -814,7 +814,7 @@ class Versionable(models.Model):
         # set earlier_version's ID to a new UUID so the clone (later_version) can
         # get the old one -- this allows 'head' to always have the original
         # id allowing us to get at all historic foreign key relationships
-        earlier_version.id = unicode(uuid.uuid4())
+        earlier_version.id = six.u(str(uuid.uuid4()))
         earlier_version.version_end_date = forced_version_date
         earlier_version.save()
 
@@ -888,7 +888,7 @@ class VersionedManyToManyModel(object):
         :return: None
         """
         if isinstance(instance, sender) and isinstance(instance, Versionable):
-            ident = unicode(uuid.uuid4())
+            ident = six.u(str(uuid.uuid4()))
             now = get_utc_now()
             if not hasattr(instance, 'version_start_date') or instance.version_start_date is None:
                 instance.version_start_date = now
