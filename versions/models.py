@@ -492,7 +492,7 @@ class VersionedReverseSingleRelatedObjectDescriptor(ReverseSingleRelatedObjectDe
 
         if not isinstance(current_elt, Versionable):
             raise TypeError("It seems like " + str(type(self)) + " is not a Versionable")
-        
+
         return current_elt.__class__.objects.as_of(instance.as_of).get(identity=current_elt.identity)
 
 
