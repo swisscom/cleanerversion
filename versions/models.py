@@ -486,8 +486,13 @@ class VersionedReverseSingleRelatedObjectDescriptor(ReverseSingleRelatedObjectDe
         :return: Returns a Versionable
         """
         current_elt = super(VersionedReverseSingleRelatedObjectDescriptor, self).__get__(instance, instance_type)
+
+        if not current_elt:
+            return None
+
         if not isinstance(current_elt, Versionable):
             raise TypeError("It seems like " + str(type(self)) + " is not a Versionable")
+
         return current_elt.__class__.objects.as_of(instance.as_of).get(identity=current_elt.identity)
 
 

@@ -729,7 +729,6 @@ class OneToManyTest(TestCase):
         self.assertEqual(2, team_at_t2.player_set.count())
 
     def test_creating_new_version_of_the_player(self):
-        global filter
         t1 = get_utc_now()
         sleep(0.1)
 
@@ -804,6 +803,8 @@ class OneToManyTest(TestCase):
         # there should be 1 players in the team if we put ourselves back at time t2
         team_at_t2 = Team.objects.as_of(t2).first()
         self.assertEqual(1, team_at_t2.player_set.all().count())
+        p1_at_t2 = Player.objects.as_of(t2).get(name__startswith='p1')
+        self.assertIsNone(p1_at_t2.team)
 
         # there should be 2 players in the team if we put ourselves back at time t3
         team_at_t3 = Team.objects.as_of(t3).first()
@@ -1094,17 +1095,20 @@ class ManyToManyFilteringTest(TestCase):
         c2.save()
         c3.save()
 
+        self.t0 = get_utc_now()
+        sleep(0.1)
+
         c2.c3s.add(c3)
         c1.c2s.add(c2)
 
         self.t1 = get_utc_now()
-        sleep(0.2)
+        sleep(0.1)
 
         c3a = C3(name='c3a.v1')
         c3a.save()
         c2.c3s.add(c3a)
 
-        sleep(0.2)
+        sleep(0.1)
         self.t2 = get_utc_now()
 
     def test_filtering_one_jump(self):
@@ -1113,6 +1117,13 @@ class ManyToManyFilteringTest(TestCase):
         """
         should_be_c1 = C1.objects.filter(c2s__name__startswith='c2').first()
         self.assertIsNotNone(should_be_c1)
+
+    def test_inexistent_relations_at_t0(self):
+        """
+        Test return value when there is no element assigned to a M2M relationship
+        """
+        c1_at_t0 = C1.objects.as_of(self.t0).get()
+        self.assertEqual([], list(c1_at_t0.c2s.all()))
 
     def test_filtering_one_jump_with_version_at_t1(self):
         """
