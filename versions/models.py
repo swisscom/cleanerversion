@@ -840,7 +840,7 @@ class Versionable(models.Model):
     def at(self, timestamp):
         """
         Force the create date of an object to be at a certain time; This method can be invoked only on a
-        freshly created Versionable object. It must not have been cloned yet. Raises a SuspitiousOperation
+        freshly created Versionable object. It must not have been cloned yet. Raises a SuspiciousOperation
         exception, otherwise.
         :param timestamp: a datetime.datetime instance
         """
