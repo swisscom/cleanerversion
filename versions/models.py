@@ -760,13 +760,13 @@ class Versionable(models.Model):
 
     def _delete_at(self, timestamp, using=None):
         """
-        WARNING: This method if only for internal use, it should not be used
+        WARNING: This method is only for internal use, it should not be used
         from outside.
 
         It is used only in the case when you want to make sure a group of
         related objects are deleted at the exact same time.
 
-        It is certainly not meant to be used for deleting an object and give it
+        It is certainly not meant to be used for deleting an object and giving it
         a random deletion date of your liking.
         """
         if self.version_end_date is None:
@@ -781,10 +781,10 @@ class Versionable(models.Model):
 
     def _clone_at(self, timestamp):
         """
-        WARNING: This method if only for internal use, it should not be used
+        WARNING: This method is only for internal use, it should not be used
         from outside.
 
-        This function is mostly intended for testing, to allow us creating
+        This function is mostly intended for testing, to allow creating
         realistic test cases.
         """
         return self.clone(forced_version_date=timestamp)
@@ -840,7 +840,7 @@ class Versionable(models.Model):
     def at(self, timestamp):
         """
         Force the create date of an object to be at a certain time; This method can be invoked only on a
-        freshly created Versionable object. It must not have been cloned yet. Raises a SuspitiousOperation
+        freshly created Versionable object. It must not have been cloned yet. Raises a SuspiciousOperation
         exception, otherwise.
         :param timestamp: a datetime.datetime instance
         """
