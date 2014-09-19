@@ -674,7 +674,7 @@ class VersionedReverseManyRelatedObjectsDescriptor(ReverseManyRelatedObjectsDesc
     'related_manager_cls' property
     """
 
-    def __get__(self, instance, owner):
+    def __get__(self, instance, owner=None):
         """
         Reads the property as which this object is figuring; mainly used for debugging purposes
         :param instance: The instance on which the getter was called
@@ -704,7 +704,7 @@ class VersionedManyRelatedObjectsDescriptor(ManyRelatedObjectsDescriptor):
         super(VersionedManyRelatedObjectsDescriptor, self).__init__(related)
         self.via_field_name = via_field_name
 
-    def __get__(self, instance, owner):
+    def __get__(self, instance, owner=None):
         """
         Reads the property as which this object is figuring; mainly used for debugging purposes
         :param instance: The instance on which the getter was called
