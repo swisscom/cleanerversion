@@ -1229,5 +1229,3 @@ class ManyToManyFilteringTest(TestCase):
             count = C3.objects.as_of(self.t2) \
                 .filter(c2s__c1s__name__startswith='c1').propagate_querytime().all().count()
             self.assertEqual(2, count)
-
-
