@@ -10,6 +10,12 @@ env:
 install:
   - pip install -q django==$DJANGO_VERSION
   - pip install six
+  - pip install coveralls
 
 # Run tests
-script: DJANGO_SETTINGS_MODULE=cleanerversion.settings.base python ./manage.py test versions
+script:
+  coverage run --source=versions ./manage.py test
+
+# Run coveralls
+after_success:
+  coveralls
