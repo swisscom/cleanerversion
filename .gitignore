@@ -10,8 +10,9 @@
 .vagrant/*
 Vagrantfile
 
-# Ignore proprietary docs, everything will be ported to README
-docs/*
+# Ignore build-directories for documentation
+docs/_build
+docs/ref
 
 # Ignore stuff related to building and publishing the package
 dist/*
