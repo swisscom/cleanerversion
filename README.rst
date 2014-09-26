@@ -1,6 +1,15 @@
-**************
-CleanerVersion
-**************
+*************************
+CleanerVersion for Django
+*************************
+
+.. image:: https://travis-ci.org/swisscom/cleanerversion.png?branch=master
+    :target: https://travis-ci.org/swisscom/cleanerversion
+.. image:: https://coveralls.io/repos/swisscom/cleanerversion/badge.png?branch=master
+   :target: https://coveralls.io/r/swisscom/cleanerversion
+.. image:: https://pypip.in/v/cleanerversion/badge.png
+   :target: https://pypi.python.org/pypi/CleanerVersion
+.. image:: https://pypip.in/d/cleanerversion/badge.png
+   :target: https://pypi.python.org/pypi/CleanerVersion
 
 Abstract
 ========
