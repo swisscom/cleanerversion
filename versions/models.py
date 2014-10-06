@@ -22,7 +22,7 @@ from django.db.models.fields import FieldDoesNotExist
 from django.db.models.fields.related import ForeignKey, ReverseSingleRelatedObjectDescriptor, \
     ReverseManyRelatedObjectsDescriptor, ManyToManyField, ManyRelatedObjectsDescriptor, create_many_related_manager, \
     ForeignRelatedObjectsDescriptor
-from django.db.models.query import QuerySet, ValuesListQuerySet
+from django.db.models.query import QuerySet, ValuesListQuerySet, ValuesQuerySet
 from django.db.models.signals import post_init
 from django.utils.functional import cached_property
 from django.utils.timezone import utc
@@ -208,6 +208,11 @@ class VersionedQuerySet(QuerySet):
             item.as_of = self.query_time
         elif isinstance(item, VersionedQuerySet):
             item.query_time = self.query_time
+        elif isinstance(self, ValuesQuerySet):
+            # When we are dealing with a ValueQuerySet there is no point in
+            # setting the query_time as we are returning an array of values
+            # instead of a full-fledged model object
+            pass
         else:
             if type_check:
                 raise TypeError("This item is not a Versionable, it's a " + str(type(item)))
