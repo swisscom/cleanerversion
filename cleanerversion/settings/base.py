@@ -24,6 +24,8 @@ TEMPLATE_DEBUG = True
 
 ALLOWED_HOSTS = []
 
+MIDDLEWARE_CLASSES = ()
+
 # Database
 # https://docs.djangoproject.com/en/dev/ref/settings/#databases
 DATABASES = {
