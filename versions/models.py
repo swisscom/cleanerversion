@@ -208,6 +208,11 @@ class VersionedQuerySet(QuerySet):
             item.as_of = self.query_time
         elif isinstance(item, VersionedQuerySet):
             item.query_time = self.query_time
+        elif isinstance(self, ValueQuerySet):
+            # When we are dealing with a ValueQuerySet there is no point in
+            # setting the query_time as we are returning an array of values
+            # instead of a full-fledged model object
+            pass
         else:
             if type_check:
                 raise TypeError("This item is not a Versionable, it's a " + str(type(item)))
