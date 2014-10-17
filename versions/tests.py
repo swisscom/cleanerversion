@@ -18,7 +18,7 @@ from django.db.models.fields import CharField
 from django.test import TestCase
 import datetime
 from django.utils.timezone import utc
-import six
+from django.utils import six
 from time import sleep
 import itertools
 

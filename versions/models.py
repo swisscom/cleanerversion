@@ -26,7 +26,7 @@ from django.db.models.query import QuerySet, ValuesListQuerySet, ValuesQuerySet
 from django.db.models.signals import post_init
 from django.utils.functional import cached_property
 from django.utils.timezone import utc
-import six
+from django.utils import six
 import uuid
 
 from django.db import models, router
