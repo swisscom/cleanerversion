@@ -398,5 +398,8 @@ Removing objects from a versioned M2M relationship
 Known Issues
 ============
 
-Currently there are no known issues; for a more updated state please check our `project page
-<https://github.com/swisscom/cleanerversion>`_.
+* No `multi-table inheritance <https://docs.djangoproject.com/en/1.7/topics/db/models/#multi-table-inheritance>`_ support.
+  Multi-table inheritance currently does not work if the parent model has a Versionable base class.
+  See `this issue <https://github.com/swisscom/cleanerversion/issues/19>`_ for more details.
+
+For a more up-to-date state please check our `project page <https://github.com/swisscom/cleanerversion>`_.
