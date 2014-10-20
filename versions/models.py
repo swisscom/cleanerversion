@@ -202,8 +202,6 @@ class VersionedQuerySet(QuerySet):
         :param type_check: Check the item to be a Versionable
         :return: Returns the item itself with the time set
         """
-        if self.query_time is None:
-            self.query_time = get_utc_now()
         if isinstance(item, Versionable):
             item.as_of = self.query_time
         elif isinstance(item, VersionedQuerySet):
@@ -221,12 +219,29 @@ class VersionedQuerySet(QuerySet):
     def as_of(self, qtime=None):
         """
         Sets the time for which we want to retrieve an object.
-        :param qtime: The date and time; set to now if left empty
+        :param qtime: The UTC date and time; if None then use the current state (where version_end_date = NULL)
         :return: A VersionedQuerySet
         """
-        time = self.set_as_of(qtime)
-        return self.filter(Q(version_end_date__gt=time) | Q(version_end_date__isnull=True),
-                           version_start_date__lte=time)
+        return self.add_as_of_filter(self, qtime)
+
+    def add_as_of_filter(self, queryset, querytime):
+        """
+        Add a version time restriction filter to the given queryset.
+
+        If querytime = None, then the filter will simply restrict to the current objects (those
+        with version_end_date = NULL).
+
+        :param queryset: a VersionedQuerySet object
+        :param querytime: UTC datetime object, or None.
+        :return: VersionedQuerySet
+        """
+        if querytime:
+            queryset.query_time = querytime
+            filter = (Q(version_end_date__gt=querytime) | Q(version_end_date__isnull=True)) \
+                     & Q(version_start_date__lte=querytime)
+        else:
+            filter = Q(version_end_date__isnull=True)
+        return queryset.filter(filter)
 
     def set_as_of(self, time=None):
         """
@@ -236,16 +251,6 @@ class VersionedQuerySet(QuerySet):
         :return: datetime
         """
         self.query_time = time or get_utc_now()
-        return self.query_time
-
-    def get_query_time(self):
-        """
-        Gets the query time for this queryset.  If none was set previously,
-        it will be set to the default value.
-        :return: datetime
-        """
-        if self.query_time is None:
-            return self.set_as_of()
         return self.query_time
 
     def propagate_querytime(self, relation_table=None):
@@ -273,15 +278,18 @@ class VersionedQuerySet(QuerySet):
         else:
             relation_tables = self.related_table_in_filter
 
-        query_time = self.get_query_time()
+        query_time = self.query_time
         where_clauses = []
         params = []
         for relation_table in relation_tables:
-            where_clauses.append(
-                "{0}.version_end_date > %s OR {1}.version_end_date is NULL".format(relation_table, relation_table))
-            where_clauses.append("{0}.version_start_date <= %s".format(relation_table))
-            params.append(query_time)
-            params.append(query_time)
+            if query_time:
+                where_clauses.append(
+                    '''{table}.version_start_date <= %s
+                        AND ({table}.version_end_date > %s OR {table}.version_end_date is NULL )
+                    '''.format(table=relation_table))
+                params += [query_time, query_time]
+            else:
+                where_clauses.append("{0}.version_end_date is NULL".format(relation_table))
 
         return self.extra(where=where_clauses, params=params)
 

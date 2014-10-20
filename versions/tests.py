@@ -1020,14 +1020,9 @@ class SelfOneToManyTest(TestCase):
         Directory.objects.create(name='subdir3.v1', parent=current_parentdir)
         t2 = get_utc_now()
 
-        # there must not be 3 subdirectories in the parent directory, since current_parentdir holds the state
-        # at t1 - prior to adding "subdir3"
-        self.assertNotEqual(3, current_parentdir.directory_set.all().count())
-        # If we wanted this comparision to be equal, we'd need to removed the 'as_of' timestamp within 'current_parentdir'
-        # Let's do that:
-        current_parentdir.as_of = None
+        # There must be 3 subdirectories in the parent directory now. Since current_parentdir has never had an as_of
+        # specified, it will reflect the current state.
         self.assertEqual(3, current_parentdir.directory_set.all().count())
-
 
         # there should be 2 directories in the parent directory at time t1
         parentdir_at_t1 = Directory.objects.as_of(t1).filter(name='parent.v1').first()
