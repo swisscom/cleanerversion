@@ -222,9 +222,9 @@ class VersionedQuerySet(QuerySet):
         :param qtime: The UTC date and time; if None then use the current state (where version_end_date = NULL)
         :return: A VersionedQuerySet
         """
-        return self.add_as_of_filter(self, qtime)
+        return self.add_as_of_filter(qtime)
 
-    def add_as_of_filter(self, queryset, querytime):
+    def add_as_of_filter(self, querytime):
         """
         Add a version time restriction filter to the given queryset.
 
@@ -236,22 +236,12 @@ class VersionedQuerySet(QuerySet):
         :return: VersionedQuerySet
         """
         if querytime:
-            queryset.query_time = querytime
+            self.query_time = querytime
             filter = (Q(version_end_date__gt=querytime) | Q(version_end_date__isnull=True)) \
                      & Q(version_start_date__lte=querytime)
         else:
             filter = Q(version_end_date__isnull=True)
-        return queryset.filter(filter)
-
-    def set_as_of(self, time=None):
-        """
-        Sets the query_time for this queryset, which is used to restrict the
-        selected records to only those that are valid as of this time.
-        :param time: query time to use, defaults to get_utc_now()
-        :return: datetime
-        """
-        self.query_time = time or get_utc_now()
-        return self.query_time
+        return self.filter(filter)
 
     def propagate_querytime(self, relation_table=None):
         """
