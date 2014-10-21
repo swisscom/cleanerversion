@@ -390,6 +390,7 @@ class VersionedQuerySet(QuerySet):
         qs = super(VersionedQuerySet, self).values_list(*fields, **kwargs)
         return qs.add_as_of_filter(qs.query_time)
 
+
 class VersionedForeignKey(ForeignKey):
     """
     We need to replace the standard ForeignKey declaration in order to be able to introduce
@@ -633,9 +634,13 @@ def create_versioned_many_related_manager(superclass, rel):
                 for relation in qs:
                     relation._delete_at(timestamp)
 
-        # FIXME: There could potentially be a problem when trying to remove and re-add an item from/to a relationship; see django/db/models/fields/related.py:654-658
-
         if 'add' in dir(many_related_manager_klass):
+            def add(self, *objs):
+                if not self.instance.is_current:
+                    raise SuspiciousOperation(
+                        "Adding many-to-many related objects is only possible on the current version")
+                super(VersionedManyRelatedManager, self).add(*objs)
+
             def add_at(self, timestamp, *objs):
                 """
                 This function adds an object at a certain point in time (timestamp)

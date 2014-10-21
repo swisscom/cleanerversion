@@ -217,7 +217,6 @@ class MultiM2MTest(TestCase):
             annika.professors.all().first()
 
     def test_adding_multiple_related_objects(self):
-
         # In the setUp, Benny had a professor, and then no more.
         all_professors = list(Professor.objects.current.all())
         benny = Student.objects.current.get(name='Benny')
@@ -252,7 +251,6 @@ class MultiM2MTest(TestCase):
         self.assertRaises(ValueError, lambda: benny.professors.add_at(self.t4, *all_professors))
 
     def test_querying_multiple_related_objects_on_added_object(self):
-
         # In the setUp, Benny had a professor, and then no more.
         all_professors = list(Professor.objects.current.all())
         benny = Student.objects.current.get(name='Benny')
