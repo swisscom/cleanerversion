@@ -14,6 +14,7 @@
 
 import copy
 import datetime
+from django import VERSION
 from django.core.exceptions import SuspiciousOperation, MultipleObjectsReturned, ObjectDoesNotExist
 from django.db.models.base import Model
 from django.db.models.constants import LOOKUP_SEP
@@ -190,6 +191,23 @@ class VersionedQuerySet(QuerySet):
         :param kwargs: Same as the original QuerySet._clone params
         :return: Just as QuerySet._clone, this method returns a clone of the original object
         """
+        if VERSION[:2] == (1, 6):
+            klass = kwargs.pop('klass', None)
+            # This patch was taken from Django 1.7 and is applied only in case we're using Django 1.6 and
+            # ValuesListQuerySet objects. Since VersionedQuerySet is not a subclass of ValuesListQuerySet, a new type
+            # inheriting from both is created and used as class.
+            # https://github.com/django/django/blob/1.7/django/db/models/query.py#L943
+            if klass and not issubclass(self.__class__, klass):
+                base_queryset_class = getattr(self, '_base_queryset_class', self.__class__)
+                class_bases = (klass, base_queryset_class)
+                class_dict = {
+                    '_base_queryset_class': base_queryset_class,
+                    '_specialized_queryset_class': klass,
+                }
+                kwargs['klass'] = type(klass.__name__, class_bases, class_dict)
+            else:
+                kwargs['klass'] = klass
+
         clone = super(VersionedQuerySet, self)._clone(**kwargs)
         clone.query_time = self.query_time
         clone.related_table_in_filter = self.related_table_in_filter
