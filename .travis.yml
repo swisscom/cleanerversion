@@ -9,7 +9,6 @@ env:
 # Dependencies
 install:
   - pip install -q django==$DJANGO_VERSION
-  - pip install six
   - pip install coveralls
 
 # Run tests
