@@ -15,6 +15,7 @@
 import copy
 import datetime
 from django.core.exceptions import SuspiciousOperation, MultipleObjectsReturned, ObjectDoesNotExist
+from django.db.models.base import Model
 from django.db.models.constants import LOOKUP_SEP
 
 from django.db.models import Q
@@ -742,7 +743,7 @@ class VersionedReverseManyRelatedObjectsDescriptor(ReverseManyRelatedObjectsDesc
         :rtype : tuple
         """
         new_ids = self.pks_from_objects(new_objects)
-        relation_manager = getattr(instance, self.field.name)
+        relation_manager = self.__get__(instance)
 
         filter = Q(**{relation_manager.source_field.attname: instance.pk})
         qs = self.through.objects.current.filter(filter)
@@ -763,7 +764,7 @@ class VersionedReverseManyRelatedObjectsDescriptor(ReverseManyRelatedObjectsDesc
         Extract all the primary key strings from the given objects.  Objects may be Versionables, or bare primary keys.
         :rtype : set
         """
-        return {o.pk if isinstance(o, Versionable) else o for o in objects}
+        return {o.pk if isinstance(o, Model) else o for o in objects}
 
     @cached_property
     def related_manager_cls(self):
