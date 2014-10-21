@@ -215,6 +215,27 @@ class MultiM2MTest(TestCase):
         with self.assertNumQueries(1):
             annika.professors.all().first()
 
+    def test_adding_multiple_related_objects(self):
+
+        # In the setUp, Benny had a professor, and then no more.
+        all_professors = list(Professor.objects.current.all())
+        benny =  Student.objects.current.get(name='Benny')
+        benny.professors.add(*all_professors)
+        benny.as_of = get_utc_now()
+        # This was once failing because _add_items() was filtering out items it didn't need to re-add,
+        # but it was not restricting the query to find those objects with any as-of time.
+        self.assertSetEqual(set(list(benny.professors.all())), set(all_professors))
+
+    def test_querying_multiple_related_objects_on_added_object(self):
+
+        # In the setUp, Benny had a professor, and then no more.
+        all_professors = list(Professor.objects.current.all())
+        benny =  Student.objects.current.get(name='Benny')
+        benny.professors.add(*all_professors)
+        # This was once failing because benny's as_of time had been set by the call to Student.objects.current,
+        # and was being propagated to the query selecting the relations, which were added after as_of was set.
+        self.assertSetEqual(set(list(benny.professors.all())), set(all_professors))
+
 
 class Pupil(Versionable):
     name = CharField(max_length=200)
