@@ -231,7 +231,6 @@ class VersionedQuerySet(QuerySet):
         If querytime = None, then the filter will simply restrict to the current objects (those
         with version_end_date = NULL).
 
-        :param queryset: a VersionedQuerySet object
         :param querytime: UTC datetime object, or None.
         :return: VersionedQuerySet
         """
@@ -273,12 +272,14 @@ class VersionedQuerySet(QuerySet):
         params = []
         for relation_table in relation_tables:
             if query_time:
+                # There was a query_time set on the current VersionedQuerySet (self), so propagate it
                 where_clauses.append(
                     '''{table}.version_start_date <= %s
                         AND ({table}.version_end_date > %s OR {table}.version_end_date is NULL )
                     '''.format(table=relation_table))
                 params += [query_time, query_time]
             else:
+                # There was no query_time set on the current VersionedQuerySet (self), so look for "current" entries
                 where_clauses.append("{0}.version_end_date is NULL".format(relation_table))
 
         return self.extra(where=where_clauses, params=params)
@@ -382,6 +383,12 @@ class VersionedQuerySet(QuerySet):
 
         return queryset
 
+    def values_list(self, *fields, **kwargs):
+        """
+        Overridden so that an as_of filter will be added to the queryset returned by the parent method.
+        """
+        qs = super(VersionedQuerySet, self).values_list(*fields, **kwargs)
+        return qs.add_as_of_filter(qs.query_time)
 
 class VersionedForeignKey(ForeignKey):
     """

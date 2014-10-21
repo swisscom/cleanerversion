@@ -21,6 +21,7 @@ from django.utils.timezone import utc
 from django.utils import six
 from time import sleep
 import itertools
+from unittest import skip
 
 from versions.models import Versionable, VersionedForeignKey, VersionedManyToManyField, get_utc_now
 
@@ -214,6 +215,51 @@ class MultiM2MTest(TestCase):
         annika = Student.objects.current.get(name='Annika')
         with self.assertNumQueries(1):
             annika.professors.all().first()
+
+    def test_adding_multiple_related_objects(self):
+
+        # In the setUp, Benny had a professor, and then no more.
+        all_professors = list(Professor.objects.current.all())
+        benny = Student.objects.current.get(name='Benny')
+        benny.professors.add(*all_professors)
+        benny.as_of = get_utc_now()
+        # This was once failing because _add_items() was filtering out items it didn't need to re-add,
+        # but it was not restricting the query to find those objects with any as-of time.
+        self.assertSetEqual(set(list(benny.professors.all())), set(all_professors))
+
+    def test_adding_multiple_related_objects_using_a_valid_timestamp(self):
+        all_professors = list(Professor.objects.current.all())
+        benny = Student.objects.current.get(name='Benny')
+        benny.professors.add_at(self.t4, *all_professors)
+        # Test the addition of objects in the past
+        self.assertSetEqual(set(list(benny.professors.all())), set(all_professors))
+
+    @skip("To be implemented")
+    def test_adding_multiple_related_objects_using_an_invalid_timestamp(self):
+        #TODO: See test_adding_multiple_related_objects and make use of add_at and a timestamp laying outside the
+        # current object's lifetime
+
+        # Create a new version beyond self.t4
+        benny = Student.objects.current.get(name='Benny')
+        benny = benny.clone()
+        benny.name = "Benedict"
+        benny.save()
+
+        all_professors = list(Professor.objects.current.all())
+        # Test the addition of objects in the past with a timestamp that points before the current
+        # versions lifetime
+        # TODO: Raise an error when adding objects outside the lifetime of an object (even if it's a discouraged use case)
+        self.assertRaises(ValueError, lambda: benny.professors.add_at(self.t4, *all_professors))
+
+    def test_querying_multiple_related_objects_on_added_object(self):
+
+        # In the setUp, Benny had a professor, and then no more.
+        all_professors = list(Professor.objects.current.all())
+        benny = Student.objects.current.get(name='Benny')
+        benny.professors.add(*all_professors)
+        # This was once failing because benny's as_of time had been set by the call to Student.objects.current,
+        # and was being propagated to the query selecting the relations, which were added after as_of was set.
+        self.assertSetEqual(set(list(benny.professors.all())), set(all_professors))
 
 
 class Pupil(Versionable):
