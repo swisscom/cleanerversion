@@ -698,6 +698,73 @@ class VersionedReverseManyRelatedObjectsDescriptor(ReverseManyRelatedObjectsDesc
         """
         return super(VersionedReverseManyRelatedObjectsDescriptor, self).__get__(instance, owner)
 
+    def __set__(self, instance, value):
+        """
+        Completely overridden to avoid bulk deletion that happens when the parent method calls clear().
+
+        The parent method's logic is basically: clear all in bulk, then add the given objects in bulk.
+        Instead, we figure out which ones are being added and removed, and call add and remove for these values.
+        This lets us retain the versioning information.
+
+        Since this is a many-to-many relationship, it is assumed here that the django.db.models.deletion.Collector
+        logic, that is used in clear(), is not necessary here.  Collector collects related models, e.g. ones that should
+        also be deleted because they have a ON CASCADE DELETE relationship to the object, or, in the case of
+        "Multi-table inheritance", are parent objects.
+
+        :param instance: The instance on which the getter was called
+        :param value: iterable of items to set
+        """
+
+        if not instance.is_current:
+            raise SuspiciousOperation(
+                "Related values can only be directly set on the current version of an object")
+
+        if not self.field.rel.through._meta.auto_created:
+            opts = self.field.rel.through._meta
+            raise AttributeError("Cannot set values on a ManyToManyField which specifies an intermediary model.  Use %s.%s's Manager instead." % (opts.app_label, opts.object_name))
+
+        manager = self.__get__(instance)
+        # Below comment is from parent __set__ method.  We'll force evaluation, too:
+        # clear() can change expected output of 'value' queryset, we force evaluation
+        # of queryset before clear; ticket #19816
+        value = tuple(value)
+
+        being_removed, being_added = self.get_current_m2m_diff(instance, value)
+        timestamp = get_utc_now()
+        manager.remove_at(timestamp, *being_removed)
+        manager.add_at(timestamp, *being_added)
+
+    def get_current_m2m_diff(self, instance, new_objects):
+        """
+        :param instance: Versionable object
+        :param new_objects: objects which are about to be associated with instance
+        :return: (being_removed id list, being_added id list)
+        :rtype : tuple
+        """
+        new_ids = self.pks_from_objects(new_objects)
+        relation_manager = getattr(instance, self.field.name)
+
+        filter = Q(**{relation_manager.source_field.attname: instance.pk})
+        qs = self.through.objects.current.filter(filter)
+        try:
+            # Django 1.7
+            target_name = relation_manager.target_field.attname
+        except AttributeError:
+            # Django 1.6
+            target_name = relation_manager.through._meta.get_field_by_name(relation_manager.target_field_name)[0].attname
+        current_ids = set(qs.values_list(target_name, flat=True))
+
+        being_removed = current_ids - new_ids
+        being_added = new_ids - current_ids
+        return list(being_removed), list(being_added)
+
+    def pks_from_objects(self, objects):
+        """
+        Extract all the primary key strings from the given objects.  Objects may be Versionables, or bare primary keys.
+        :rtype : set
+        """
+        return {o.pk if isinstance(o, Versionable) else o for o in objects}
+
     @cached_property
     def related_manager_cls(self):
         return create_versioned_many_related_manager(
