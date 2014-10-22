@@ -14,7 +14,9 @@
 
 import copy
 import datetime
+from django import VERSION
 from django.core.exceptions import SuspiciousOperation, MultipleObjectsReturned, ObjectDoesNotExist
+from django.db.models.base import Model
 from django.db.models.constants import LOOKUP_SEP
 
 from django.db.models import Q
@@ -189,6 +191,23 @@ class VersionedQuerySet(QuerySet):
         :param kwargs: Same as the original QuerySet._clone params
         :return: Just as QuerySet._clone, this method returns a clone of the original object
         """
+        if VERSION[:2] == (1, 6):
+            klass = kwargs.pop('klass', None)
+            # This patch was taken from Django 1.7 and is applied only in case we're using Django 1.6 and
+            # ValuesListQuerySet objects. Since VersionedQuerySet is not a subclass of ValuesListQuerySet, a new type
+            # inheriting from both is created and used as class.
+            # https://github.com/django/django/blob/1.7/django/db/models/query.py#L943
+            if klass and not issubclass(self.__class__, klass):
+                base_queryset_class = getattr(self, '_base_queryset_class', self.__class__)
+                class_bases = (klass, base_queryset_class)
+                class_dict = {
+                    '_base_queryset_class': base_queryset_class,
+                    '_specialized_queryset_class': klass,
+                }
+                kwargs['klass'] = type(klass.__name__, class_bases, class_dict)
+            else:
+                kwargs['klass'] = klass
+
         clone = super(VersionedQuerySet, self)._clone(**kwargs)
         clone.query_time = self.query_time
         clone.related_table_in_filter = self.related_table_in_filter
@@ -222,36 +241,25 @@ class VersionedQuerySet(QuerySet):
         :param qtime: The UTC date and time; if None then use the current state (where version_end_date = NULL)
         :return: A VersionedQuerySet
         """
-        return self.add_as_of_filter(self, qtime)
+        return self.add_as_of_filter(qtime)
 
-    def add_as_of_filter(self, queryset, querytime):
+    def add_as_of_filter(self, querytime):
         """
         Add a version time restriction filter to the given queryset.
 
         If querytime = None, then the filter will simply restrict to the current objects (those
         with version_end_date = NULL).
 
-        :param queryset: a VersionedQuerySet object
         :param querytime: UTC datetime object, or None.
         :return: VersionedQuerySet
         """
         if querytime:
-            queryset.query_time = querytime
+            self.query_time = querytime
             filter = (Q(version_end_date__gt=querytime) | Q(version_end_date__isnull=True)) \
                      & Q(version_start_date__lte=querytime)
         else:
             filter = Q(version_end_date__isnull=True)
-        return queryset.filter(filter)
-
-    def set_as_of(self, time=None):
-        """
-        Sets the query_time for this queryset, which is used to restrict the
-        selected records to only those that are valid as of this time.
-        :param time: query time to use, defaults to get_utc_now()
-        :return: datetime
-        """
-        self.query_time = time or get_utc_now()
-        return self.query_time
+        return self.filter(filter)
 
     def propagate_querytime(self, relation_table=None):
         """
@@ -283,12 +291,14 @@ class VersionedQuerySet(QuerySet):
         params = []
         for relation_table in relation_tables:
             if query_time:
+                # There was a query_time set on the current VersionedQuerySet (self), so propagate it
                 where_clauses.append(
                     '''{table}.version_start_date <= %s
                         AND ({table}.version_end_date > %s OR {table}.version_end_date is NULL )
                     '''.format(table=relation_table))
                 params += [query_time, query_time]
             else:
+                # There was no query_time set on the current VersionedQuerySet (self), so look for "current" entries
                 where_clauses.append("{0}.version_end_date is NULL".format(relation_table))
 
         return self.extra(where=where_clauses, params=params)
@@ -397,7 +407,7 @@ class VersionedQuerySet(QuerySet):
         Overridden so that an as_of filter will be added to the queryset returned by the parent method.
         """
         qs = super(VersionedQuerySet, self).values_list(*fields, **kwargs)
-        return self.add_as_of_filter(qs, qs.query_time)
+        return qs.add_as_of_filter(qs.query_time)
 
 
 class VersionedForeignKey(ForeignKey):
@@ -751,7 +761,7 @@ class VersionedReverseManyRelatedObjectsDescriptor(ReverseManyRelatedObjectsDesc
         :rtype : tuple
         """
         new_ids = self.pks_from_objects(new_objects)
-        relation_manager = getattr(instance, self.field.name)
+        relation_manager = self.__get__(instance)
 
         filter = Q(**{relation_manager.source_field.attname: instance.pk})
         qs = self.through.objects.current.filter(filter)
@@ -772,7 +782,7 @@ class VersionedReverseManyRelatedObjectsDescriptor(ReverseManyRelatedObjectsDesc
         Extract all the primary key strings from the given objects.  Objects may be Versionables, or bare primary keys.
         :rtype : set
         """
-        return {o.pk if isinstance(o, Versionable) else o for o in objects}
+        return {o.pk if isinstance(o, Model) else o for o in objects}
 
     @cached_property
     def related_manager_cls(self):
