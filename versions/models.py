@@ -15,7 +15,9 @@
 import copy
 import datetime
 from django import VERSION
-from django.apps.registry import apps
+
+if VERSION[:2] >= (1, 7):
+    from django.apps.registry import apps
 from django.core.exceptions import SuspiciousOperation, MultipleObjectsReturned, ObjectDoesNotExist
 from django.db.models.base import Model
 from django.db.models.constants import LOOKUP_SEP
@@ -27,7 +29,6 @@ from django.db.models.fields.related import ForeignKey, ReverseSingleRelatedObje
     ForeignRelatedObjectsDescriptor
 from django.db.models.query import QuerySet, ValuesListQuerySet, ValuesQuerySet
 from django.db.models.signals import post_init
-from django.forms.models import model_to_dict
 from django.utils.functional import cached_property
 from django.utils.timezone import utc
 from django.utils import six
@@ -361,7 +362,7 @@ class VersionedQuerySet(QuerySet):
             if not paths_stack:
                 return tables
             else:
-                if isinstance(field_object, VersionedManyToManyField)\
+                if isinstance(field_object, VersionedManyToManyField) \
                         or isinstance(field_object, VersionedForeignKey):
                     model_class = field_object.rel.to
                 else:
@@ -487,7 +488,7 @@ class VersionedManyToManyField(ManyToManyField):
             to = field.rel.to._meta.object_name
         name = '%s_%s' % (from_, field_name)
 
-        if cls.__module__ == '__fake__':
+        if VERSION[:2] >= (1, 7) and cls.__module__ == '__fake__':
             try:
                 # Check the apps for an already registered model
                 return apps.get_registered_model(cls._meta.app_label, str(name))
@@ -751,7 +752,9 @@ class VersionedReverseManyRelatedObjectsDescriptor(ReverseManyRelatedObjectsDesc
 
         if not self.field.rel.through._meta.auto_created:
             opts = self.field.rel.through._meta
-            raise AttributeError("Cannot set values on a ManyToManyField which specifies an intermediary model.  Use %s.%s's Manager instead." % (opts.app_label, opts.object_name))
+            raise AttributeError(
+                "Cannot set values on a ManyToManyField which specifies an intermediary model.  Use %s.%s's Manager instead." % (
+                    opts.app_label, opts.object_name))
 
         manager = self.__get__(instance)
         # Below comment is from parent __set__ method.  We'll force evaluation, too:
@@ -781,7 +784,8 @@ class VersionedReverseManyRelatedObjectsDescriptor(ReverseManyRelatedObjectsDesc
             target_name = relation_manager.target_field.attname
         except AttributeError:
             # Django 1.6
-            target_name = relation_manager.through._meta.get_field_by_name(relation_manager.target_field_name)[0].attname
+            target_name = relation_manager.through._meta.get_field_by_name(relation_manager.target_field_name)[
+                0].attname
         current_ids = set(qs.values_list(target_name, flat=True))
 
         being_removed = current_ids - new_ids
@@ -838,30 +842,30 @@ class Versionable(models.Model):
     This is pretty much the central point for versioning objects.
     """
 
-    #: id stands for ID and is the primary key; sometimes also referenced as the surrogate key
     id = models.CharField(max_length=36, primary_key=True)
+    """id stands for ID and is the primary key; sometimes also referenced as the surrogate key"""
 
-    #: identity is used as the identifier of an object, ignoring its versions; sometimes also referenced as the natural key
     identity = models.CharField(max_length=36)
+    """identity is used as the identifier of an object, ignoring its versions; sometimes also referenced as the natural key"""
 
-    #: version_start_date points the moment in time, when a version was created (ie. an versionable was cloned). This means,
-    #: it points the start of a clone's validity period
     version_start_date = models.DateTimeField()
+    """version_start_date points the moment in time, when a version was created (ie. an versionable was cloned).
+    This means, it points the start of a clone's validity period"""
 
-    #: version_end_date, if set, points the moment in time, when the entry was duplicated (ie. the entry was cloned). It
-    #: points therefore the end of a clone's validity period
     version_end_date = models.DateTimeField(null=True, default=None, blank=True)
+    """version_end_date, if set, points the moment in time, when the entry was duplicated (ie. the entry was cloned). It
+    points therefore the end of a clone's validity period"""
 
-    #: version_birth_date contains the timestamp pointing to when the versionable has been created (independent of any
-    #: version); This timestamp is bound to an identity
     version_birth_date = models.DateTimeField()
+    """version_birth_date contains the timestamp pointing to when the versionable has been created (independent of any
+    version); This timestamp is bound to an identity"""
 
-    #: Make the versionable compliant with Django
     objects = VersionManager()
+    """Make the versionable compliant with Django"""
 
-    #: Hold the timestamp at which the object's data was looked up. Its value must always be in between the
-    #: version_start_date and the version_end_date
     as_of = None
+    """Hold the timestamp at which the object's data was looked up. Its value must always be in between the
+    version_start_date and the version_end_date"""
 
     class Meta:
         abstract = True
