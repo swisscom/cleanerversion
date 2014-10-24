@@ -57,7 +57,7 @@ DATABASES = {
 
 # Application definition
 INSTALLED_APPS = (
-    'versions',
+    'versions_tests',
 )
 
 # Internationalization
