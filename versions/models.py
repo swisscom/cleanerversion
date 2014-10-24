@@ -15,6 +15,7 @@
 import copy
 import datetime
 from django import VERSION
+from django.apps.registry import apps
 from django.core.exceptions import SuspiciousOperation, MultipleObjectsReturned, ObjectDoesNotExist
 from django.db.models.base import Model
 from django.db.models.constants import LOOKUP_SEP
@@ -26,6 +27,7 @@ from django.db.models.fields.related import ForeignKey, ReverseSingleRelatedObje
     ForeignRelatedObjectsDescriptor
 from django.db.models.query import QuerySet, ValuesListQuerySet, ValuesQuerySet
 from django.db.models.signals import post_init
+from django.forms.models import model_to_dict
 from django.utils.functional import cached_property
 from django.utils.timezone import utc
 from django.utils import six
@@ -448,7 +450,7 @@ class VersionedManyToManyField(ManyToManyField):
         # - creating the through class if unset
         # - resolving the through class if it's a string
         # - resolving string references within the through class
-        if not self.rel.through and not cls._meta.abstract and not cls._meta.swapped and cls.__module__ != '__fake__':
+        if not self.rel.through and not cls._meta.abstract and not cls._meta.swapped:
             self.rel.through = VersionedManyToManyField.create_versioned_many_to_many_intermediary_model(self, cls,
                                                                                                          name)
         super(VersionedManyToManyField, self).contribute_to_class(cls, name)
@@ -485,9 +487,18 @@ class VersionedManyToManyField(ManyToManyField):
             to = field.rel.to._meta.object_name
         name = '%s_%s' % (from_, field_name)
 
+        if cls.__module__ == '__fake__':
+            try:
+                # Check the apps for an already registered model
+                return apps.get_registered_model(cls._meta.app_label, str(name))
+            except KeyError:
+                # The model has not been registered yet, so continue
+                pass
+
         meta = type('Meta', (object,), {
             # 'unique_together': (from_, to),
             'auto_created': cls,
+            'app_label': cls._meta.app_label,
         })
         return type(str(name), (Versionable,), {
             'Meta': meta,
