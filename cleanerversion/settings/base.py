@@ -36,7 +36,23 @@ DATABASES = {
         'PASSWORD': '',
         'HOST': '',
         'PORT': '',
-    }
+    },
+    # 'postgresql': {
+    #     'ENGINE': 'django.db.backends.postgresql_psycopg2',
+    #     'NAME': 'psqldb',
+    #     'USER': 'psqluser',
+    #     'PASSWORD': 'psqlpwd',
+    #     'HOST': '127.0.0.1',
+    #     'PORT': '5432',
+    # },
+    # 'sqlite3': {
+    #     'ENGINE': 'django.db.backends.sqlite3',
+    #     'NAME': 'sqlite.db',
+    #     'USER': '',
+    #     'PASSWORD': '',
+    #     'HOST': '',
+    #     'PORT': '',
+    # }
 }
 
 # Application definition
