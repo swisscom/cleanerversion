@@ -12,15 +12,16 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import datetime
+from time import sleep
+import itertools
 from django.core.exceptions import SuspiciousOperation, ObjectDoesNotExist, MultipleObjectsReturned, ValidationError
 from django.db.models import Q
 from django.db.models.fields import CharField
-from django.test import TestCase
-import datetime
+from django.test import TestCase, TransactionTestCase
 from django.utils.timezone import utc
 from django.utils import six
-from time import sleep
-import itertools
+from unittest import skip
 
 from versions.models import Versionable, VersionedForeignKey, VersionedManyToManyField, get_utc_now
 
@@ -214,6 +215,95 @@ class MultiM2MTest(TestCase):
         annika = Student.objects.current.get(name='Annika')
         with self.assertNumQueries(1):
             annika.professors.all().first()
+
+    def test_adding_multiple_related_objects(self):
+        # In the setUp, Benny had a professor, and then no more.
+        all_professors = list(Professor.objects.current.all())
+        benny = Student.objects.current.get(name='Benny')
+        benny.professors.add(*all_professors)
+        benny.as_of = get_utc_now()
+        # This was once failing because _add_items() was filtering out items it didn't need to re-add,
+        # but it was not restricting the query to find those objects with any as-of time.
+        self.assertSetEqual(set(list(benny.professors.all())), set(all_professors))
+
+    def test_adding_multiple_related_objects_using_a_valid_timestamp(self):
+        all_professors = list(Professor.objects.current.all())
+        benny = Student.objects.current.get(name='Benny')
+        benny.professors.add_at(self.t4, *all_professors)
+        # Test the addition of objects in the past
+        self.assertSetEqual(set(list(benny.professors.all())), set(all_professors))
+
+    @skip("To be implemented")
+    def test_adding_multiple_related_objects_using_an_invalid_timestamp(self):
+        #TODO: See test_adding_multiple_related_objects and make use of add_at and a timestamp laying outside the
+        # current object's lifetime
+
+        # Create a new version beyond self.t4
+        benny = Student.objects.current.get(name='Benny')
+        benny = benny.clone()
+        benny.name = "Benedict"
+        benny.save()
+
+        all_professors = list(Professor.objects.current.all())
+        # Test the addition of objects in the past with a timestamp that points before the current
+        # versions lifetime
+        # TODO: Raise an error when adding objects outside the lifetime of an object (even if it's a discouraged use case)
+        self.assertRaises(ValueError, lambda: benny.professors.add_at(self.t4, *all_professors))
+
+    def test_querying_multiple_related_objects_on_added_object(self):
+        # In the setUp, Benny had a professor, and then no more.
+        all_professors = list(Professor.objects.current.all())
+        benny = Student.objects.current.get(name='Benny')
+        benny.professors.add(*all_professors)
+        # This was once failing because benny's as_of time had been set by the call to Student.objects.current,
+        # and was being propagated to the query selecting the relations, which were added after as_of was set.
+        self.assertSetEqual(set(list(benny.professors.all())), set(all_professors))
+
+    def test_direct_assignment_of_relations(self):
+        """
+        Ensure that when relations that are directly set (e.g. not via add() or remove(),
+        that their versioning information is kept.
+        """
+        benny =  Student.objects.current.get(name='Benny')
+        all_professors = list(Professor.objects.current.all())
+        first_professor = all_professors[0]
+        last_professor = all_professors[-1]
+        some_professor_ids = [o.pk for o in all_professors][:2]
+        self.assertNotEquals(first_professor.identity, last_professor.identity)
+        self.assertTrue(1 < len(some_professor_ids) < len(all_professors))
+
+        self.assertEqual(benny.professors.count(), 0)
+        t0 = get_utc_now()
+        benny.professors.add(first_professor)
+        t1 = get_utc_now()
+
+        benny.professors = all_professors
+        t2 = get_utc_now()
+
+        benny.professors = [last_professor]
+        t3 = get_utc_now()
+
+        # Also try assigning with a list of pks, instead of objects:
+        benny.professors = some_professor_ids
+        t4 = get_utc_now()
+
+        # Benny ain't groovin' it.
+        benny.professors = []
+        t5 = get_utc_now()
+
+        benny0 = Student.objects.as_of(t0).get(identity=benny.identity)
+        benny1 = Student.objects.as_of(t1).get(identity=benny.identity)
+        benny2 = Student.objects.as_of(t2).get(identity=benny.identity)
+        benny3 = Student.objects.as_of(t3).get(identity=benny.identity)
+        benny4 = Student.objects.as_of(t4).get(identity=benny.identity)
+        benny5 = Student.objects.as_of(t5).get(identity=benny.identity)
+
+        self.assertSetEqual(set(list(benny0.professors.all())), set())
+        self.assertSetEqual(set(list(benny1.professors.all())), set([first_professor]))
+        self.assertSetEqual(set(list(benny2.professors.all())), set(all_professors))
+        self.assertSetEqual(set(list(benny3.professors.all())), set([last_professor]))
+        self.assertSetEqual(set([o.pk for o in benny4.professors.all()]), set(some_professor_ids))
+        self.assertSetEqual(set(list(benny5.professors.all())), set())
 
 
 class Pupil(Versionable):
@@ -1020,14 +1110,9 @@ class SelfOneToManyTest(TestCase):
         Directory.objects.create(name='subdir3.v1', parent=current_parentdir)
         t2 = get_utc_now()
 
-        # there must not be 3 subdirectories in the parent directory, since current_parentdir holds the state
-        # at t1 - prior to adding "subdir3"
-        self.assertNotEqual(3, current_parentdir.directory_set.all().count())
-        # If we wanted this comparision to be equal, we'd need to removed the 'as_of' timestamp within 'current_parentdir'
-        # Let's do that:
-        current_parentdir.as_of = None
+        # There must be 3 subdirectories in the parent directory now. Since current_parentdir has never had an as_of
+        # specified, it will reflect the current state.
         self.assertEqual(3, current_parentdir.directory_set.all().count())
-
 
         # there should be 2 directories in the parent directory at time t1
         parentdir_at_t1 = Directory.objects.as_of(t1).filter(name='parent.v1').first()

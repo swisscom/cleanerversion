@@ -14,7 +14,9 @@
 
 import copy
 import datetime
+from django import VERSION
 from django.core.exceptions import SuspiciousOperation, MultipleObjectsReturned, ObjectDoesNotExist
+from django.db.models.base import Model
 from django.db.models.constants import LOOKUP_SEP
 
 from django.db.models import Q
@@ -189,6 +191,23 @@ class VersionedQuerySet(QuerySet):
         :param kwargs: Same as the original QuerySet._clone params
         :return: Just as QuerySet._clone, this method returns a clone of the original object
         """
+        if VERSION[:2] == (1, 6):
+            klass = kwargs.pop('klass', None)
+            # This patch was taken from Django 1.7 and is applied only in case we're using Django 1.6 and
+            # ValuesListQuerySet objects. Since VersionedQuerySet is not a subclass of ValuesListQuerySet, a new type
+            # inheriting from both is created and used as class.
+            # https://github.com/django/django/blob/1.7/django/db/models/query.py#L943
+            if klass and not issubclass(self.__class__, klass):
+                base_queryset_class = getattr(self, '_base_queryset_class', self.__class__)
+                class_bases = (klass, base_queryset_class)
+                class_dict = {
+                    '_base_queryset_class': base_queryset_class,
+                    '_specialized_queryset_class': klass,
+                }
+                kwargs['klass'] = type(klass.__name__, class_bases, class_dict)
+            else:
+                kwargs['klass'] = klass
+
         clone = super(VersionedQuerySet, self)._clone(**kwargs)
         clone.query_time = self.query_time
         clone.related_table_in_filter = self.related_table_in_filter
@@ -202,8 +221,6 @@ class VersionedQuerySet(QuerySet):
         :param type_check: Check the item to be a Versionable
         :return: Returns the item itself with the time set
         """
-        if self.query_time is None:
-            self.query_time = get_utc_now()
         if isinstance(item, Versionable):
             item.as_of = self.query_time
         elif isinstance(item, VersionedQuerySet):
@@ -221,32 +238,28 @@ class VersionedQuerySet(QuerySet):
     def as_of(self, qtime=None):
         """
         Sets the time for which we want to retrieve an object.
-        :param qtime: The date and time; set to now if left empty
+        :param qtime: The UTC date and time; if None then use the current state (where version_end_date = NULL)
         :return: A VersionedQuerySet
         """
-        time = self.set_as_of(qtime)
-        return self.filter(Q(version_end_date__gt=time) | Q(version_end_date__isnull=True),
-                           version_start_date__lte=time)
+        return self.add_as_of_filter(qtime)
 
-    def set_as_of(self, time=None):
+    def add_as_of_filter(self, querytime):
         """
-        Sets the query_time for this queryset, which is used to restrict the
-        selected records to only those that are valid as of this time.
-        :param time: query time to use, defaults to get_utc_now()
-        :return: datetime
-        """
-        self.query_time = time or get_utc_now()
-        return self.query_time
+        Add a version time restriction filter to the given queryset.
 
-    def get_query_time(self):
+        If querytime = None, then the filter will simply restrict to the current objects (those
+        with version_end_date = NULL).
+
+        :param querytime: UTC datetime object, or None.
+        :return: VersionedQuerySet
         """
-        Gets the query time for this queryset.  If none was set previously,
-        it will be set to the default value.
-        :return: datetime
-        """
-        if self.query_time is None:
-            return self.set_as_of()
-        return self.query_time
+        if querytime:
+            self.query_time = querytime
+            filter = (Q(version_end_date__gt=querytime) | Q(version_end_date__isnull=True)) \
+                     & Q(version_start_date__lte=querytime)
+        else:
+            filter = Q(version_end_date__isnull=True)
+        return self.filter(filter)
 
     def propagate_querytime(self, relation_table=None):
         """
@@ -273,15 +286,20 @@ class VersionedQuerySet(QuerySet):
         else:
             relation_tables = self.related_table_in_filter
 
-        query_time = self.get_query_time()
+        query_time = self.query_time
         where_clauses = []
         params = []
         for relation_table in relation_tables:
-            where_clauses.append(
-                "{0}.version_end_date > %s OR {1}.version_end_date is NULL".format(relation_table, relation_table))
-            where_clauses.append("{0}.version_start_date <= %s".format(relation_table))
-            params.append(query_time)
-            params.append(query_time)
+            if query_time:
+                # There was a query_time set on the current VersionedQuerySet (self), so propagate it
+                where_clauses.append(
+                    '''{table}.version_start_date <= %s
+                        AND ({table}.version_end_date > %s OR {table}.version_end_date is NULL )
+                    '''.format(table=relation_table))
+                params += [query_time, query_time]
+            else:
+                # There was no query_time set on the current VersionedQuerySet (self), so look for "current" entries
+                where_clauses.append("{0}.version_end_date is NULL".format(relation_table))
 
         return self.extra(where=where_clauses, params=params)
 
@@ -383,6 +401,13 @@ class VersionedQuerySet(QuerySet):
                 queryset.related_table_in_filter = queryset.related_table_in_filter.union(tables)
 
         return queryset
+
+    def values_list(self, *fields, **kwargs):
+        """
+        Overridden so that an as_of filter will be added to the queryset returned by the parent method.
+        """
+        qs = super(VersionedQuerySet, self).values_list(*fields, **kwargs)
+        return qs.add_as_of_filter(qs.query_time)
 
 
 class VersionedForeignKey(ForeignKey):
@@ -628,9 +653,13 @@ def create_versioned_many_related_manager(superclass, rel):
                 for relation in qs:
                     relation._delete_at(timestamp)
 
-        # FIXME: There could potentially be a problem when trying to remove and re-add an item from/to a relationship; see django/db/models/fields/related.py:654-658
-
         if 'add' in dir(many_related_manager_klass):
+            def add(self, *objs):
+                if not self.instance.is_current:
+                    raise SuspiciousOperation(
+                        "Adding many-to-many related objects is only possible on the current version")
+                super(VersionedManyRelatedManager, self).add(*objs)
+
             def add_at(self, timestamp, *objs):
                 """
                 This function adds an object at a certain point in time (timestamp)
@@ -687,6 +716,73 @@ class VersionedReverseManyRelatedObjectsDescriptor(ReverseManyRelatedObjectsDesc
         :return: A VersionedManyRelatedManager object
         """
         return super(VersionedReverseManyRelatedObjectsDescriptor, self).__get__(instance, owner)
+
+    def __set__(self, instance, value):
+        """
+        Completely overridden to avoid bulk deletion that happens when the parent method calls clear().
+
+        The parent method's logic is basically: clear all in bulk, then add the given objects in bulk.
+        Instead, we figure out which ones are being added and removed, and call add and remove for these values.
+        This lets us retain the versioning information.
+
+        Since this is a many-to-many relationship, it is assumed here that the django.db.models.deletion.Collector
+        logic, that is used in clear(), is not necessary here.  Collector collects related models, e.g. ones that should
+        also be deleted because they have a ON CASCADE DELETE relationship to the object, or, in the case of
+        "Multi-table inheritance", are parent objects.
+
+        :param instance: The instance on which the getter was called
+        :param value: iterable of items to set
+        """
+
+        if not instance.is_current:
+            raise SuspiciousOperation(
+                "Related values can only be directly set on the current version of an object")
+
+        if not self.field.rel.through._meta.auto_created:
+            opts = self.field.rel.through._meta
+            raise AttributeError("Cannot set values on a ManyToManyField which specifies an intermediary model.  Use %s.%s's Manager instead." % (opts.app_label, opts.object_name))
+
+        manager = self.__get__(instance)
+        # Below comment is from parent __set__ method.  We'll force evaluation, too:
+        # clear() can change expected output of 'value' queryset, we force evaluation
+        # of queryset before clear; ticket #19816
+        value = tuple(value)
+
+        being_removed, being_added = self.get_current_m2m_diff(instance, value)
+        timestamp = get_utc_now()
+        manager.remove_at(timestamp, *being_removed)
+        manager.add_at(timestamp, *being_added)
+
+    def get_current_m2m_diff(self, instance, new_objects):
+        """
+        :param instance: Versionable object
+        :param new_objects: objects which are about to be associated with instance
+        :return: (being_removed id list, being_added id list)
+        :rtype : tuple
+        """
+        new_ids = self.pks_from_objects(new_objects)
+        relation_manager = self.__get__(instance)
+
+        filter = Q(**{relation_manager.source_field.attname: instance.pk})
+        qs = self.through.objects.current.filter(filter)
+        try:
+            # Django 1.7
+            target_name = relation_manager.target_field.attname
+        except AttributeError:
+            # Django 1.6
+            target_name = relation_manager.through._meta.get_field_by_name(relation_manager.target_field_name)[0].attname
+        current_ids = set(qs.values_list(target_name, flat=True))
+
+        being_removed = current_ids - new_ids
+        being_added = new_ids - current_ids
+        return list(being_removed), list(being_added)
+
+    def pks_from_objects(self, objects):
+        """
+        Extract all the primary key strings from the given objects.  Objects may be Versionables, or bare primary keys.
+        :rtype : set
+        """
+        return {o.pk if isinstance(o, Model) else o for o in objects}
 
     @cached_property
     def related_manager_cls(self):
