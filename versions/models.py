@@ -488,6 +488,10 @@ class VersionedManyToManyField(ManyToManyField):
             to = field.rel.to._meta.object_name
         name = '%s_%s' % (from_, field_name)
 
+        # Since Django 1.7, a migration mechanism is shipped by default with Django. This migration module loads all
+        # declared apps' models inside a __fake__ module.
+        # This means that the models can be already loaded and registered by their original module, when we
+        # reach this point of the application and therefore there is no need to load them a second time.
         if VERSION[:2] >= (1, 7) and cls.__module__ == '__fake__':
             try:
                 # Check the apps for an already registered model
@@ -784,8 +788,8 @@ class VersionedReverseManyRelatedObjectsDescriptor(ReverseManyRelatedObjectsDesc
             target_name = relation_manager.target_field.attname
         except AttributeError:
             # Django 1.6
-            target_name = relation_manager.through._meta.get_field_by_name(relation_manager.target_field_name)[
-                0].attname
+            target_name = relation_manager.through._meta.get_field_by_name(
+                relation_manager.target_field_name)[0].attname
         current_ids = set(qs.values_list(target_name, flat=True))
 
         being_removed = current_ids - new_ids
