@@ -828,22 +828,22 @@ class Versionable(models.Model):
     """
 
     #: id stands for ID and is the primary key; sometimes also referenced as the surrogate key
-    id = models.CharField(max_length=36, primary_key=True)
+    id = models.CharField(max_length=36, primary_key=True, editable=False)
 
     #: identity is used as the identifier of an object, ignoring its versions; sometimes also referenced as the natural key
-    identity = models.CharField(max_length=36)
+    identity = models.CharField(max_length=36, editable=False)
 
     #: version_start_date points the moment in time, when a version was created (ie. an versionable was cloned). This means,
     #: it points the start of a clone's validity period
-    version_start_date = models.DateTimeField()
+    version_start_date = models.DateTimeField(editable=False)
 
     #: version_end_date, if set, points the moment in time, when the entry was duplicated (ie. the entry was cloned). It
     #: points therefore the end of a clone's validity period
-    version_end_date = models.DateTimeField(null=True, default=None, blank=True)
+    version_end_date = models.DateTimeField(null=True, default=None, blank=True, editable=False)
 
     #: version_birth_date contains the timestamp pointing to when the versionable has been created (independent of any
     #: version); This timestamp is bound to an identity
-    version_birth_date = models.DateTimeField()
+    version_birth_date = models.DateTimeField(editable=False)
 
     #: Make the versionable compliant with Django
     objects = VersionManager()
