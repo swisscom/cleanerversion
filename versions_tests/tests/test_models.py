@@ -17,13 +17,14 @@ from time import sleep
 import itertools
 from django.core.exceptions import SuspiciousOperation, ObjectDoesNotExist, MultipleObjectsReturned, ValidationError
 from django.db.models import Q
-from django.db.models.fields import CharField
-from django.test import TestCase, TransactionTestCase
+from django.test import TestCase
 from django.utils.timezone import utc
 from django.utils import six
 from unittest import skip
 
-from versions.models import Versionable, VersionedForeignKey, VersionedManyToManyField, get_utc_now
+from versions.models import Versionable, get_utc_now
+from versions_tests.models import Professor, Classroom, Student, Pupil, Teacher, Observer, B, Subject, Team, Player, \
+    Directory, C1, C2, C3
 
 
 def get_relation_table(model_class, fieldname):
@@ -33,32 +34,6 @@ def get_relation_table(model_class, fieldname):
     else:
         field = field_object.field
     return field.m2m_db_table()
-
-
-class Professor(Versionable):
-    name = CharField(max_length=200)
-    address = CharField(max_length=200)
-    phone_number = CharField(max_length=200)
-
-    def __str__(self):
-        return self.name
-
-
-class Classroom(Versionable):
-    name = CharField(max_length=200)
-    building = CharField(max_length=200)
-
-    def __str__(self):
-        return self.name
-
-
-class Student(Versionable):
-    name = CharField(max_length=200)
-    professors = VersionedManyToManyField("Professor", related_name='students')
-    classrooms = VersionedManyToManyField("Classroom", related_name='students')
-
-    def __str__(self):
-        return self.name
 
 
 class MultiM2MTest(TestCase):
@@ -235,7 +210,7 @@ class MultiM2MTest(TestCase):
 
     @skip("To be implemented")
     def test_adding_multiple_related_objects_using_an_invalid_timestamp(self):
-        #TODO: See test_adding_multiple_related_objects and make use of add_at and a timestamp laying outside the
+        # TODO: See test_adding_multiple_related_objects and make use of add_at and a timestamp laying outside the
         # current object's lifetime
 
         # Create a new version beyond self.t4
@@ -264,7 +239,7 @@ class MultiM2MTest(TestCase):
         Ensure that when relations that are directly set (e.g. not via add() or remove(),
         that their versioning information is kept.
         """
-        benny =  Student.objects.current.get(name='Benny')
+        benny = Student.objects.current.get(name='Benny')
         all_professors = list(Professor.objects.current.all())
         first_professor = all_professors[0]
         last_professor = all_professors[-1]
@@ -304,18 +279,6 @@ class MultiM2MTest(TestCase):
         self.assertSetEqual(set(list(benny3.professors.all())), set([last_professor]))
         self.assertSetEqual(set([o.pk for o in benny4.professors.all()]), set(some_professor_ids))
         self.assertSetEqual(set(list(benny5.professors.all())), set())
-
-
-class Pupil(Versionable):
-    name = CharField(max_length=200)
-    phone_number = CharField(max_length=200)
-    language_teachers = VersionedManyToManyField('Teacher', related_name='language_students')
-    science_teachers = VersionedManyToManyField('Teacher', related_name='science_students')
-
-
-class Teacher(Versionable):
-    name = CharField(max_length=200)
-    domain = CharField(max_length=200)
 
 
 class MultiM2MToSameTest(TestCase):
@@ -395,19 +358,12 @@ class MultiM2MToSameTest(TestCase):
 
 
 class HistoricM2MOperationsTests(TestCase):
-    class Observer(Versionable):
-        name = CharField(max_length=200)
-
-    class Subject(Versionable):
-        name = CharField(max_length=200)
-        observers = VersionedManyToManyField('Observer', related_name='subjects')
-
     def setUp(self):
         # Set up a situation on 23.4.1984
         ts = datetime.datetime(1984, 4, 23, tzinfo=utc)
-        big_brother = HistoricM2MOperationsTests.Observer.objects._create_at(ts, name='BigBrother')
+        big_brother = Observer.objects._create_at(ts, name='BigBrother')
         self.big_brother = big_brother
-        subject = HistoricM2MOperationsTests.Subject.objects._create_at(ts, name='Winston Smith')
+        subject = Subject.objects._create_at(ts, name='Winston Smith')
         big_brother.subjects.add_at(ts, subject)
 
         # Remove the relationship on 23.5.1984
@@ -416,7 +372,7 @@ class HistoricM2MOperationsTests(TestCase):
 
     def test_observer_subject_relationship_is_active_in_early_1984(self):
         ts = datetime.datetime(1984, 5, 1, tzinfo=utc)
-        observer = HistoricM2MOperationsTests.Observer.objects.as_of(ts).get()
+        observer = Observer.objects.as_of(ts).get()
         self.assertEqual(observer.name, 'BigBrother')
         subjects = observer.subjects.all()
         self.assertEqual(len(subjects), 1)
@@ -424,19 +380,15 @@ class HistoricM2MOperationsTests(TestCase):
 
     def test_observer_subject_relationship_is_inactive_in_late_1984(self):
         ts = datetime.datetime(1984, 8, 16, tzinfo=utc)
-        observer = HistoricM2MOperationsTests.Observer.objects.as_of(ts).get()
+        observer = Observer.objects.as_of(ts).get()
         self.assertEqual(observer.name, 'BigBrother')
         subjects = observer.subjects.all()
         self.assertEqual(len(subjects), 0)
-        subject = HistoricM2MOperationsTests.Subject.objects.as_of(ts).get()
+        subject = Subject.objects.as_of(ts).get()
         self.assertEqual(subject.name, 'Winston Smith')
 
     def test_simple(self):
         self.big_brother.subjects.all().first()
-
-
-class B(Versionable):
-    name = CharField(max_length=200)
 
 
 def set_up_one_object_with_3_versions():
@@ -765,20 +717,6 @@ class CurrentVersionTest(TestCase):
         self.assertIsNone(B.objects.current_version(current))
 
 
-class Team(Versionable):
-    name = CharField(max_length=200)
-
-
-class Player(Versionable):
-    name = CharField(max_length=200)
-    team = VersionedForeignKey(Team, null=True)
-
-    def __str__(self):
-        return "<" + str(self.__class__.__name__) + " object: " + str(
-            self.name) + " {valid: [" + self.version_start_date.isoformat() + " | " + (
-                   self.version_end_date.isoformat() if self.version_end_date else "None") + "], created: " + self.version_birth_date.isoformat() + "}>"
-
-
 class OneToManyTest(TestCase):
     def setUp(self):
         self.team = Team.objects.create(name='t.v1')
@@ -1021,11 +959,6 @@ class OneToManyTest(TestCase):
         self.assertListEqual(sorted(t1_players), sorted(['p1.v1', 'p2.v1']))
 
 
-class Directory(Versionable):
-    name = CharField(max_length=100)
-    parent = VersionedForeignKey('self', null=True)
-
-
 class SelfOneToManyTest(TestCase):
     def setUp(self):
         """
@@ -1154,20 +1087,6 @@ class SelfOneToManyTest(TestCase):
         # there should be 2 directories in the parent directory at time t3
         parentdir_at_t3 = Directory.objects.as_of(t3).get(name__startswith='parent')
         self.assertEqual(2, parentdir_at_t3.directory_set.all().count())
-
-
-class C1(Versionable):
-    name = CharField(max_length=50)
-    c2s = VersionedManyToManyField("C2", related_name='c1s')
-
-
-class C2(Versionable):
-    name = CharField(max_length=50)
-    c3s = VersionedManyToManyField("C3", related_name='c2s')
-
-
-class C3(Versionable):
-    name = CharField(max_length=50)
 
 
 class ManyToManyFilteringTest(TestCase):

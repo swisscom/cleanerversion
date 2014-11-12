@@ -3,7 +3,7 @@ Historization with CleanerVersion
 *********************************
 
 Disclaimer: This documentation as well as the CleanerVersion application code have been written to work against Django
-1.6.x and 1.7. The documentation may not be accurate anymore when using more recent versions of Django.
+1.6.x and 1.7.x. The documentation may not be accurate anymore when using more recent versions of Django.
 
 .. _cleanerversion-quick-starter:
 
@@ -19,21 +19,24 @@ pip-installation)::
 
     pip install cleanerversion
 
-Once you have your Django project in place, register CleanerVersion to the ``INSTALLED_APPS`` variable by adding the
-``versions`` keyword as follows::
+If you want to check whether your components are compatible with CleanerVersion, you can run the unit tests coming
+with CleanerVersion. To do so, register the CleanerVersion test app to the ``INSTALLED_APPS`` variable
+of your Django project by adding the ``versions_tests`` keyword as follows::
 
     INSTALLED_APPS = (
         ...
-        'versions',
+        'versions_tests',
         ...
     )
 
-If you want to be sure, whether things work out correctly, run CleanerVersion's unittests from within your Django
+Now, whether things work out correctly, run CleanerVersion's unit tests from within your Django
 project root::
 
-    python manage.py test versions
+    python manage.py test versions_tests
 
 If this terminates with a ``OK``, you're all set. Go on and create your models as follows.
+Keep in mind that you are not required to keep ``versions_tests`` in your ``INSTALLED_APPS`` settings, it will only
+create unnecessary tables everytime you sync with your DB. So, you can safely remove it after having run the test suite.
 
 
 A simple versionable model

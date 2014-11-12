@@ -39,6 +39,8 @@ CleanerVersion's feature-set includes the following bullet points:
 
   - For any point in time, retrieval of correct related objects
 
+* Migrations, if using in conjunction with Django 1.7 and upwards
+
 
 Prerequisites
 =============
