@@ -388,6 +388,13 @@ class VersionedForeignKey(ForeignKey):
             setattr(cls, accessor_name, VersionedForeignRelatedObjectsDescriptor(related))
 
     def get_extra_restriction(self, where_class, alias, remote_alias):
+        """
+        Overrides ForeignObject's get_extra_restriction function that returns an SQL statement which is appended to a
+        JOIN's conditional filtering part
+
+        :return: SQL conditional statement
+        :rtype: str
+        """
         cond = None
         if self.apply_as_of_time:
             if self.as_of_time:

@@ -22,6 +22,7 @@ from django.test import TestCase, TransactionTestCase
 from django.utils.timezone import utc
 from django.utils import six
 from unittest import skip
+import re
 
 from versions.models import Versionable, get_utc_now
 from versions_tests.models import Professor, Classroom, Student, Pupil, Teacher, Observer, B, Subject, Team, Player, \
@@ -57,6 +58,17 @@ def set_up_one_object_with_3_versions():
     t3 = get_utc_now()
 
     return b, t1, t2, t3
+
+def remove_white_spaces(self, s):
+    return re.sub(r'\s+', '', s)
+
+def assertStringEqualIgnoreWhiteSpaces(self, expected, obtained):
+    expected = self.remove_white_spaces(expected).lower()
+    obtained = self.remove_white_spaces(obtained).lower()
+    self.assertEqual(expected, obtained)
+
+TestCase.remove_white_spaces = remove_white_spaces
+TestCase.assertStringEqualIgnoreWhiteSpaces = assertStringEqualIgnoreWhiteSpaces
 
 
 class CreationTest(TestCase):
@@ -694,6 +706,11 @@ class OneToManyFilteringTest(TestCase):
         p2.save()
 
         self.t4 = get_utc_now()
+        sleep(0.1)
+
+        p1.delete()
+
+        self.t5 = get_utc_now()
 
     def test_filtering_on_the_other_side_of_the_relation(self):
         self.assertEqual(1, Team.objects.all().count())
@@ -744,6 +761,50 @@ class OneToManyFilteringTest(TestCase):
                                                                                                              flat=True))
         self.assertEqual(2, len(t1_players))
         self.assertListEqual(sorted(t1_players), sorted(['p1.v1', 'p2.v1']))
+
+    def test_filtering_for_deleted_player_at_t5(self):
+        team_none = Team.objects.as_of(self.t5).filter(player__name__startswith='p1').first()
+        self.assertIsNone(team_none)
+
+    def test_query_created_by_filtering_for_deleted_player_at_t5(self):
+        team_none_queryset = Team.objects.as_of(self.t5).filter(player__name__startswith='p1')
+        team_none_query = str(team_none_queryset.query)
+
+        team_table = Team._meta.db_table
+        player_table = Player._meta.db_table
+        t5_utc_w_tz = str(self.t5)
+        t5_utc_wo_tz = t5_utc_w_tz[:-6]
+
+        expected_query = """
+            SELECT
+                "{team_table}"."id",
+                "{team_table}"."identity",
+                "{team_table}"."version_start_date",
+                "{team_table}"."version_end_date",
+                "{team_table}"."version_birth_date",
+                "{team_table}"."name"
+            FROM "{team_table}"
+            INNER JOIN
+                "{player_table}" ON (
+                    "{team_table}"."id" = "{player_table}"."team_id"
+                    AND ((
+                        {player_table}.version_start_date <= {ts}
+                        AND (
+                            {player_table}.version_end_date > {ts}
+                            OR {player_table}.version_end_date is NULL
+                        )
+                    ))
+                )
+            WHERE (
+                (
+                    "{team_table}"."version_end_date" > {ts_wo_tz}
+                    OR "{team_table}"."version_end_date" IS NULL
+                )
+                AND "{team_table}"."version_start_date" <= {ts_wo_tz}
+                AND "{player_table}"."name" LIKE p1% ESCAPE '\\\'
+            )
+        """.format(ts=t5_utc_w_tz, ts_wo_tz=t5_utc_wo_tz, team_table=team_table, player_table=player_table)
+        self.assertStringEqualIgnoreWhiteSpaces(expected_query, team_none_query)
 
 
 class MultiM2MTest(TestCase):
@@ -1175,9 +1236,11 @@ class ManyToManyFilteringTest(TestCase):
         """
         should_be_c1_queryset = C1.objects.as_of(self.t1) \
             .filter(c2s__name__startswith='c2')
-        should_be_c1_query = should_be_c1_queryset.query
+        should_be_c1_query = str(should_be_c1_queryset.query)
+        expected_query = """
+        """
         print should_be_c1_query
-        self.assertTrue(False)
+        self.assertStringEqualIgnoreWhiteSpaces(expected_query, should_be_c1_query)
 
     def test_filtering_one_jump_reverse(self):
         """
@@ -1232,9 +1295,11 @@ class ManyToManyFilteringTest(TestCase):
         """
         should_be_c1_queryset = C1.objects.as_of(self.t1) \
             .filter(c2s__c3s__name__startswith='c3')
-        should_be_c1_query = should_be_c1_queryset.query
+        should_be_c1_query = str(should_be_c1_queryset.query)
+        expected_query = """
+        """
         print should_be_c1_query
-        self.assertTrue(False)
+        self.assertStringEqualIgnoreWhiteSpaces(expected_query, should_be_c1_query)
 
     def test_filtering_two_jumps_with_version_at_t2(self):
         """
