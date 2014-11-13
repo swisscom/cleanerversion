@@ -430,7 +430,7 @@ class OneToManyTest(TestCase):
             matches = filter(lambda x: x.name == 'p1.v2', team.player_set.all())
         self.assertEqual(1, len(list(matches)))
 
-    def test_adding_more_player_to_the_team(self):
+    def test_adding_one_more_player_to_the_team(self):
         t1 = get_utc_now()
         sleep(0.1)
 
@@ -522,86 +522,6 @@ class OneToManyTest(TestCase):
         # there should be 2 players in the team if we put ourselves back at time t3
         team_at_t3 = Team.objects.as_of(t3).first()
         self.assertEqual(2, team_at_t3.player_set.all().count())
-
-    def test_filtering_on_the_other_side_of_the_relation(self):
-        t1 = get_utc_now()
-        sleep(0.1)
-
-        p2 = Player.objects.get(name='p2.v1')
-        self.team.player_set.remove(p2)
-
-        t2 = get_utc_now()
-        sleep(0.1)
-
-        p1 = Player.objects.get(name='p1.v1')
-        self.team.player_set.remove(p1)
-
-        t3 = get_utc_now()
-        sleep(0.1)
-
-        # Let's get those players back into the game!
-        p1 = Player.objects.current.get(name='p1.v1')
-        p2 = Player.objects.current.get(name='p2.v1')
-        self.team.player_set.add(p1)
-        self.team.player_set.add(p2)
-
-        t4 = get_utc_now()
-
-        self.assertEqual(1, Team.objects.all().count())
-        self.assertEqual(1, Team.objects.as_of(t1).all().count())
-        self.assertEqual(3, Player.objects.filter(name='p1.v1').all().count())
-        self.assertEqual(3, Player.objects.filter(name='p2.v1').all().count())
-        self.assertEqual(1, Player.objects.as_of(t1).filter(name='p1.v1').all().count())
-        self.assertEqual(1, Player.objects.as_of(t1).filter(name='p2.v1').all().count())
-
-        # at t1 there should be one team with two players
-        p1 = Team.objects.as_of(t1).filter(player__name='p1.v1').first()
-        self.assertIsNotNone(p1)
-        p2 = Team.objects.as_of(t1).filter(player__name='p2.v1').first()
-        self.assertIsNotNone(p2)
-
-        # at t2 there should be one team with one single player called 'p1.v1'
-        p1 = Team.objects.as_of(t2).filter(player__name='p1.v1').first()
-        p2 = Team.objects.as_of(t2).filter(player__name='p2.v1').first()
-        self.assertIsNotNone(p1)
-        self.assertIsNone(p2)
-
-        # at t3 there should be one team with no players
-        p1 = Team.objects.as_of(t3).filter(player__name='p1.v1').first()
-        p2 = Team.objects.as_of(t3).filter(player__name='p2.v1').first()
-        self.assertIsNone(p1)
-        self.assertIsNone(p2)
-
-        # at t4 there should be one team with two players again!
-        p1 = Team.objects.as_of(t4).filter(player__name='p1.v1').first()
-        p2 = Team.objects.as_of(t4).filter(player__name='p2.v1').first()
-        self.assertIsNotNone(p1)
-        self.assertIsNotNone(p2)
-
-    def test_simple_filter_using_q_objects(self):
-        """
-        This tests explicitely the filtering of a versioned object using Q objects.
-        However, since this is done implicetly with every call to 'as_of', this test is redundant but is kept for
-        explicit test coverage
-        """
-        t1 = get_utc_now()
-        sleep(0.1)
-
-        p1 = Player.objects.current.get(name__startswith='p1')
-        self.team.player_set.remove(p1)
-
-        p1 = Player.objects.current.get(name__startswith='p1')
-        p1.name = 'p1.v2'
-        p1.save()
-
-        t2 = get_utc_now()
-        sleep(0.1)
-
-        t1_players = list(
-            Player.objects.as_of(t1).filter(Q(name__startswith='p1') | Q(name__startswith='p2')).values_list('name',
-                                                                                                             flat=True))
-        self.assertEqual(2, len(t1_players))
-        self.assertListEqual(sorted(t1_players), sorted(['p1.v1', 'p2.v1']))
 
 
 class SelfOneToManyTest(TestCase):
@@ -732,6 +652,98 @@ class SelfOneToManyTest(TestCase):
         # there should be 2 directories in the parent directory at time t3
         parentdir_at_t3 = Directory.objects.as_of(t3).get(name__startswith='parent')
         self.assertEqual(2, parentdir_at_t3.directory_set.all().count())
+
+
+class OneToManyFilteringTest(TestCase):
+    def setUp(self):
+        team = Team.objects.create(name='t.v1')
+        p1 = Player.objects.create(name='p1.v1', team=team)
+        p2 = Player.objects.create(name='p2.v1', team=team)
+
+        self.t1 = get_utc_now()
+        sleep(0.1)
+
+        team.player_set.remove(p2)
+
+        p2 = Player.objects.current.get(name='p2.v1')
+        p2.name = 'p2.v2'
+        p2.save()
+
+        self.t2 = get_utc_now()
+        sleep(0.1)
+
+        team.player_set.remove(p1)
+
+        p1 = Player.objects.current.get(name='p1.v1')
+        p1.name = 'p1.v2'
+        p1.save()
+
+        self.t3 = get_utc_now()
+        sleep(0.1)
+
+        # Let's get those players back into the game!
+        team.player_set.add(p1)
+        team.player_set.add(p2)
+
+        p1 = Player.objects.current.get(name__startswith='p1')
+        p1.name = 'p1.v3'
+        p1.save()
+
+        p2 = Player.objects.current.get(name__startswith='p2')
+        p2.name = 'p2.v3'
+        p2.save()
+
+        self.t4 = get_utc_now()
+
+    def test_filtering_on_the_other_side_of_the_relation(self):
+        self.assertEqual(1, Team.objects.all().count())
+        self.assertEqual(1, Team.objects.as_of(self.t1).all().count())
+        self.assertEqual(3, Player.objects.filter(name__startswith='p1').all().count())
+        self.assertEqual(3, Player.objects.filter(name__startswith='p2').all().count())
+        self.assertEqual(1, Player.objects.as_of(self.t1).filter(name='p1.v1').all().count())
+        self.assertEqual(1, Player.objects.as_of(self.t1).filter(name='p2.v1').all().count())
+
+        # at t1 there should be one team with two players
+        team_p1 = Team.objects.as_of(self.t1).filter(player__name='p1.v1').first()
+        self.assertIsNotNone(team_p1)
+        team_p2 = Team.objects.as_of(self.t1).filter(player__name='p2.v1').first()
+        self.assertIsNotNone(team_p2)
+
+        # at t2 there should be one team with one single player called 'p1.v1'
+        team_p1 = Team.objects.as_of(self.t2).filter(player__name='p1.v1').first()
+        team_p2 = Team.objects.as_of(self.t2).filter(player__name='p2.v2').first()
+        self.assertIsNotNone(team_p1)
+        self.assertEqual(team_p1.name, 't.v1')
+        self.assertEqual(1, team_p1.player_set.count())
+        self.assertIsNone(team_p2)
+
+        # at t3 there should be one team with no players
+        team_p1 = Team.objects.as_of(self.t3).filter(player__name='p1.v2').first()
+        team_p2 = Team.objects.as_of(self.t3).filter(player__name='p2.v2').first()
+        self.assertIsNone(team_p1)
+        self.assertIsNone(team_p2)
+
+        # at t4 there should be one team with two players again!
+        team_p1 = Team.objects.as_of(self.t4).filter(player__name='p1.v3').first()
+        team_p2 = Team.objects.as_of(self.t4).filter(player__name='p2.v3').first()
+        self.assertIsNotNone(team_p1)
+        self.assertEqual(team_p1.name, 't.v1')
+        self.assertIsNotNone(team_p2)
+        self.assertEqual(team_p2.name, 't.v1')
+        self.assertEqual(team_p1, team_p2)
+        self.assertEqual(2, team_p1.player_set.count())
+
+    def test_simple_filter_using_q_objects(self):
+        """
+        This tests explicitely the filtering of a versioned object using Q objects.
+        However, since this is done implicetly with every call to 'as_of', this test is redundant but is kept for
+        explicit test coverage
+        """
+        t1_players = list(
+            Player.objects.as_of(self.t1).filter(Q(name__startswith='p1') | Q(name__startswith='p2')).values_list('name',
+                                                                                                             flat=True))
+        self.assertEqual(2, len(t1_players))
+        self.assertListEqual(sorted(t1_players), sorted(['p1.v1', 'p2.v1']))
 
 
 class MultiM2MTest(TestCase):
