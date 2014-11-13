@@ -1122,6 +1122,11 @@ class ManyToManyFilteringTest(TestCase):
         c2.save()
         c3.save()
 
+        # Play on an object's instance
+        c2 = c2.clone()
+        c2.name = 'c2.v2'
+        c2.save()
+
         self.t0 = get_utc_now()
         sleep(0.1)
 
@@ -1137,6 +1142,15 @@ class ManyToManyFilteringTest(TestCase):
 
         sleep(0.1)
         self.t2 = get_utc_now()
+
+        c1 = c1.clone()
+        c1.name = 'c1.v2'
+        c1.save()
+
+        c3a.delete()
+
+        sleep(0.1)
+        self.t3 = get_utc_now()
 
     def test_filtering_one_jump(self):
         """
@@ -1160,6 +1174,33 @@ class ManyToManyFilteringTest(TestCase):
         should_be_c1 = C1.objects.as_of(self.t1) \
             .filter(c2s__name__startswith='c2').first()
         self.assertIsNotNone(should_be_c1)
+
+    def test_filtering_one_jump_with_version_at_t3(self):
+        """
+        Test filtering m2m reations with 2 models with propagaton of querytime
+        information across all tables.
+        Also test after an object being in a relationship has been deleted.
+        """
+        should_be_c2 = C2.objects.as_of(self.t3) \
+            .filter(c3s__name__startswith='c3.').first()
+        self.assertIsNotNone(should_be_c2)
+        self.assertEqual(should_be_c2.name, 'c2.v2')
+
+        should_be_none = C2.objects.as_of(self.t3) \
+            .filter(c3s__name__startswith='c3a').first()
+        self.assertIsNone(should_be_none)
+
+    @skip("Expected SQL query still needs to be defined")
+    def test_query_created_by_filtering_one_jump_with_version_at_t1(self):
+        """
+        Test filtering m2m relations with 2 models with propagation of querytime
+        information across all tables
+        """
+        should_be_c1_queryset = C1.objects.as_of(self.t1) \
+            .filter(c2s__name__startswith='c2')
+        should_be_c1_query = should_be_c1_queryset.query
+        print should_be_c1_query
+        self.assertTrue(False)
 
     def test_filtering_one_jump_reverse(self):
         """
@@ -1193,7 +1234,11 @@ class ManyToManyFilteringTest(TestCase):
         Test filtering m2m relations with 3 models with propagation of querytime
         information across all tables
         """
-        with self.assertNumQueries(2) as counter:
+        with self.assertNumQueries(3) as counter:
+            should_be_none = C1.objects.as_of(self.t1) \
+                .filter(c2s__c3s__name__startswith='c3a').first()
+            self.assertIsNone(should_be_none)
+
             should_be_c1 = C1.objects.as_of(self.t1) \
                 .filter(c2s__c3s__name__startswith='c3').first()
             self.assertIsNotNone(should_be_c1)
@@ -1202,6 +1247,17 @@ class ManyToManyFilteringTest(TestCase):
             count = C1.objects.as_of(self.t1) \
                 .filter(c2s__c3s__name__startswith='c3').all().count()
             self.assertEqual(1, count)
+
+    @skip("Expected SQL query still needs to be defined")
+    def test_query_created_by_filtering_two_jumps_with_version_at_t1(self):
+        """
+        Investigate correctness of the resulting SQL query
+        """
+        should_be_c1_queryset = C1.objects.as_of(self.t1) \
+            .filter(c2s__c3s__name__startswith='c3')
+        should_be_c1_query = should_be_c1_queryset.query
+        print should_be_c1_query
+        self.assertTrue(False)
 
     def test_filtering_two_jumps_with_version_at_t2(self):
         """
@@ -1214,6 +1270,25 @@ class ManyToManyFilteringTest(TestCase):
             self.assertIsNotNone(should_be_c1)
 
             count = C1.objects.as_of(self.t2) \
+                .filter(c2s__c3s__name__startswith='c3').all().count()
+            self.assertEqual(2, count)
+
+    def test_filtering_two_jumps_with_version_at_t3(self):
+        """
+        Test filtering m2m relations with 3 models with propagation of querytime
+        information across all tables but this time at point in time t3
+        """
+        with self.assertNumQueries(1) as counter:
+            # Should be None, since object 'c3a' does not exist anymore at t3
+            should_be_none = C1.objects.as_of(self.t3) \
+                .filter(c2s__c3s__name__startswith='c3a').first()
+            self.assertIsNone(should_be_none)
+
+            should_be_c1 = C1.objects.as_of(self.t3) \
+                .filter(c2s__c3s__name__startswith='c3a').first()
+            self.assertIsNotNone(should_be_c1)
+
+            count = C1.objects.as_of(self.t3) \
                 .filter(c2s__c3s__name__startswith='c3').all().count()
             self.assertEqual(2, count)
 
