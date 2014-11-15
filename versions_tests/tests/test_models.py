@@ -1172,6 +1172,9 @@ class ManyToManyFilteringTest(TestCase):
         c1.c2s.add(c2)
 
         self.t1 = get_utc_now()
+        # at t1:
+        #   c1.c2s = [c2]
+        #   c2.c3s = [c3]
         sleep(0.1)
 
         c3a = C3(name='c3a.v1')
@@ -1180,6 +1183,9 @@ class ManyToManyFilteringTest(TestCase):
 
         sleep(0.1)
         self.t2 = get_utc_now()
+        # at t2:
+        #   c1.c2s = [c2]
+        #   c2.c3s = [c3, c3a]
 
         c1 = c1.clone()
         c1.name = 'c1.v2'
@@ -1189,6 +1195,9 @@ class ManyToManyFilteringTest(TestCase):
 
         sleep(0.1)
         self.t3 = get_utc_now()
+        # at t3:
+        #   c1.c2s = [c2]
+        #   c2.c3s = [c3]
 
     def test_filtering_one_jump(self):
         """
@@ -1320,19 +1329,19 @@ class ManyToManyFilteringTest(TestCase):
         Test filtering m2m relations with 3 models with propagation of querytime
         information across all tables but this time at point in time t3
         """
-        with self.assertNumQueries(1) as counter:
+        with self.assertNumQueries(3) as counter:
             # Should be None, since object 'c3a' does not exist anymore at t3
             should_be_none = C1.objects.as_of(self.t3) \
                 .filter(c2s__c3s__name__startswith='c3a').first()
             self.assertIsNone(should_be_none)
 
             should_be_c1 = C1.objects.as_of(self.t3) \
-                .filter(c2s__c3s__name__startswith='c3a').first()
+                .filter(c2s__c3s__name__startswith='c3.').first()
             self.assertIsNotNone(should_be_c1)
 
             count = C1.objects.as_of(self.t3) \
-                .filter(c2s__c3s__name__startswith='c3').all().count()
-            self.assertEqual(2, count)
+                .filter(c2s__c3s__name__startswith='c3.').all().count()
+            self.assertEqual(1, count)
 
     def test_filtering_two_jumps_reverse(self):
         """
