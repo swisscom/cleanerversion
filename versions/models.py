@@ -15,6 +15,7 @@
 import copy
 import datetime
 import uuid
+from collections import namedtuple
 from django import VERSION
 
 if VERSION[:2] >= (1, 7):
@@ -39,6 +40,9 @@ from django.db import models, router
 
 def get_utc_now():
     return datetime.datetime.utcnow().replace(tzinfo=utc)
+
+
+AsOfInfo = namedtuple('AsOfInfo', 'as_of_time apply_as_of_time alias')
 
 
 class VersionManager(models.Manager):
@@ -201,7 +205,13 @@ class VersionedQuery(Query):
                 # alias_map if they aren't in a join. That's OK. We skip them.
                 continue
             if join_type and not first:
-                join_field.set_as_of(self.as_of_time, self.apply_as_of_time)
+                try:
+                    # For the case where join_field is a ManyToOneRel or similar:
+                    field = join_field.field
+                except AttributeError:
+                    # For the case where join_field is a ForeignKey:
+                    field = join_field
+                field.set_as_of(AsOfInfo(self.as_of_time, self.apply_as_of_time, alias))
             first = False
 
 class VersionedQuerySet(QuerySet):
@@ -332,45 +342,26 @@ class VersionedQuerySet(QuerySet):
         return qs.add_as_of_filter(qs.query_time)
 
 
-class VersionedManyToOneRel(ManyToOneRel):
-    """
-    Overridden to allow keeping track of the query as_of time, so that foreign keys
-    can use that information when creating the sql joins.
-    """
-
-    def set_as_of(self, as_of_time, apply_as_of_time):
-        """
-        Set the as_of time that will be used to restrict the query for the valid objects.
-        :param DateTime as_of_time: Datetime or None (None means use the current objects)
-        :param bool apply_as_of_time: If false, then the query will not be restricted by as_of_time
-        :return:
-        """
-        self.as_of_time = as_of_time
-        self.apply_as_of_time = apply_as_of_time
-        if hasattr(self, 'field'):
-            self.field.set_as_of(as_of_time, apply_as_of_time)
-
-
 class VersionedForeignKey(ForeignKey):
     """
     We need to replace the standard ForeignKey declaration in order to be able to introduce
     the VersionedReverseSingleRelatedObjectDescriptor, which allows to go back in time...
-    We also default to using the VersionedManyToOneRel, which helps us correctly limit results
-    when joining tables via foreign and many-to-many relation fields.
+    We also want to allow keeping track of any as_of time so that joins can be restricted
+    based on that.
     """
-    def __init__(self, to, rel_class=ManyToOneRel, **kwargs):
-        super(VersionedForeignKey, self).__init__(to, rel_class=VersionedManyToOneRel, **kwargs)
-        self.set_as_of(None, False)
+    def __init__(self, *args, **kwargs):
+        super(VersionedForeignKey, self).__init__(*args, **kwargs)
+        self.as_of_info = AsOfInfo(None, False, None)
 
-    def set_as_of(self, as_of_time, apply_as_of_time):
+
+    def set_as_of(self, as_of_info):
         """
         Set the as_of time that will be used to restrict the query for the valid objects.
         :param DateTime as_of_time: Datetime or None (None means use the current objects)
         :param bool apply_as_of_time: If false, then the query will not be restricted by as_of_time
         :return:
         """
-        self.as_of_time = as_of_time
-        self.apply_as_of_time = apply_as_of_time
+        self.as_of_info = as_of_info
 
     def contribute_to_class(self, cls, name, virtual_only=False):
         super(VersionedForeignKey, self).contribute_to_class(cls, name, virtual_only)
@@ -388,17 +379,26 @@ class VersionedForeignKey(ForeignKey):
             setattr(cls, accessor_name, VersionedForeignRelatedObjectsDescriptor(related))
 
     def get_extra_restriction(self, where_class, alias, remote_alias):
-        cond = None
-        if self.apply_as_of_time:
-            if self.as_of_time:
-                sql = '''{alias}.version_start_date <= %s
-                         AND ({alias}.version_end_date > %s OR {alias}.version_end_date is NULL )'''.format(alias=remote_alias)
-                params = [self.as_of_time, self.as_of_time]
-            else:
-                sql = '''{alias}.version_end_date is NULL'''.format(alias=remote_alias)
-                params = None
-            cond = ExtraWhere([sql], params)
-        return cond
+        """
+        Overrides ForeignObject's get_extra_restriction function that returns an SQL statement which is appended to a
+        JOIN's conditional filtering part
+
+        :return: SQL conditional statement
+        :rtype: str
+        """
+        as_of = self.as_of_info
+        if not as_of.apply_as_of_time:
+            return None
+
+        restrict_alias = as_of.alias
+        if as_of.as_of_time:
+            sql = '''{alias}.version_start_date <= %s
+                     AND ({alias}.version_end_date > %s OR {alias}.version_end_date is NULL )'''.format(alias=restrict_alias)
+            params = [as_of.as_of_time, as_of.as_of_time]
+        else:
+            sql = '''{alias}.version_end_date is NULL'''.format(alias=restrict_alias)
+            params = None
+        return ExtraWhere([sql], params)
 
 class VersionedManyToManyField(ManyToManyField):
     def __init__(self, *args, **kwargs):

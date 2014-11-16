@@ -3,6 +3,41 @@ from django.db.models import CharField
 from versions.models import Versionable, VersionedManyToManyField, VersionedForeignKey
 
 
+############################################
+# The following model is used for:
+# - CreationTest
+# - DeletionTest
+# - CurrentVersionTest
+# - VersionedQuerySetTest
+# - VersionNavigationTest
+# - HistoricObjectsHandling
+class B(Versionable):
+    name = CharField(max_length=200)
+
+
+############################################
+# OneToManyTest models
+class Team(Versionable):
+    name = CharField(max_length=200)
+
+
+class Player(Versionable):
+    name = CharField(max_length=200)
+    team = VersionedForeignKey(Team, null=True)
+
+    def __str__(self):
+        return "<" + str(self.__class__.__name__) + " object: " + str(
+            self.name) + " {valid: [" + self.version_start_date.isoformat() + " | " + (
+                   self.version_end_date.isoformat() if self.version_end_date else "None") + "], created: " + self.version_birth_date.isoformat() + "}>"
+
+
+############################################
+# SelfOneToManyTest models
+class Directory(Versionable):
+    name = CharField(max_length=100)
+    parent = VersionedForeignKey('self', null=True)
+
+
 # ############################################
 # MultiM2MTest models
 class Professor(Versionable):
@@ -46,52 +81,6 @@ class Teacher(Versionable):
 
 
 ############################################
-# HistoricM2MOperationsTests models
-class Observer(Versionable):
-    name = CharField(max_length=200)
-
-
-class Subject(Versionable):
-    name = CharField(max_length=200)
-    observers = VersionedManyToManyField('Observer', related_name='subjects')
-
-
-############################################
-# The following model is used for:
-# - VersionedQuerySetTest
-# - VersionNavigationTest
-# - CreationTest
-# - DeletionTest
-# - HistoricObjectsHandling
-# - CurrentVersionTest
-class B(Versionable):
-    name = CharField(max_length=200)
-
-
-############################################
-# OneToManyTest models
-class Team(Versionable):
-    name = CharField(max_length=200)
-
-
-class Player(Versionable):
-    name = CharField(max_length=200)
-    team = VersionedForeignKey(Team, null=True)
-
-    def __str__(self):
-        return "<" + str(self.__class__.__name__) + " object: " + str(
-            self.name) + " {valid: [" + self.version_start_date.isoformat() + " | " + (
-                   self.version_end_date.isoformat() if self.version_end_date else "None") + "], created: " + self.version_birth_date.isoformat() + "}>"
-
-
-############################################
-# SelfOneToManyTest models
-class Directory(Versionable):
-    name = CharField(max_length=100)
-    parent = VersionedForeignKey('self', null=True)
-
-
-############################################
 # ManyToManyFilteringTest models
 class C1(Versionable):
     name = CharField(max_length=50)
@@ -105,3 +94,14 @@ class C2(Versionable):
 
 class C3(Versionable):
     name = CharField(max_length=50)
+
+
+############################################
+# HistoricM2MOperationsTests models
+class Observer(Versionable):
+    name = CharField(max_length=200)
+
+
+class Subject(Versionable):
+    name = CharField(max_length=200)
+    observers = VersionedManyToManyField('Observer', related_name='subjects')

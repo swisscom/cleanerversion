@@ -16,12 +16,14 @@ import datetime
 from time import sleep
 import itertools
 from django.core.exceptions import SuspiciousOperation, ObjectDoesNotExist, MultipleObjectsReturned, ValidationError
+from django.db import connection
 from django.db.models import Q, Count, Sum
 from django.db.models.fields import CharField
 from django.test import TestCase, TransactionTestCase
 from django.utils.timezone import utc
 from django.utils import six
-from unittest import skip
+from unittest import skip, skipUnless
+import re
 
 from versions.models import Versionable, get_utc_now
 from versions_tests.models import Professor, Classroom, Student, Pupil, Teacher, Observer, B, Subject, Team, Player, \
@@ -35,6 +37,776 @@ def get_relation_table(model_class, fieldname):
     else:
         field = field_object.field
     return field.m2m_db_table()
+
+def set_up_one_object_with_3_versions():
+    b = B.objects.create(name='v1')
+
+    sleep(0.1)
+    t1 = get_utc_now()
+
+    b = b.clone()
+    b.name = 'v2'
+    b.save()
+
+    sleep(0.1)
+    t2 = get_utc_now()
+
+    b = b.clone()
+    b.name = 'v3'
+    b.save()
+
+    sleep(0.1)
+    t3 = get_utc_now()
+
+    return b, t1, t2, t3
+
+def remove_white_spaces(self, s):
+    return re.sub(r'\s+', '', s)
+
+def assertStringEqualIgnoreWhiteSpaces(self, expected, obtained):
+    expected = self.remove_white_spaces(expected).lower()
+    obtained = self.remove_white_spaces(obtained).lower()
+    self.assertEqual(expected, obtained)
+
+TestCase.remove_white_spaces = remove_white_spaces
+TestCase.assertStringEqualIgnoreWhiteSpaces = assertStringEqualIgnoreWhiteSpaces
+
+
+class CreationTest(TestCase):
+    def test_create_using_manager(self):
+        b = B.objects.create(name='someB')
+        self.assertTrue(isinstance(b, Versionable))
+        self.assertEqual(b.version_start_date, b.version_birth_date)
+
+        b_new = b.clone()
+        self.assertTrue(isinstance(b_new, Versionable))
+        self.assertEqual(b_new.version_start_date, b.version_end_date)
+
+    def test_create_using_constructor(self):
+        b = B(name='someB')
+        b.save()
+        self.assertTrue(isinstance(b, Versionable))
+        self.assertEqual(b.version_start_date, b.version_birth_date)
+
+        b_new = b.clone()
+        self.assertTrue(isinstance(b_new, Versionable))
+        self.assertEqual(b_new.version_start_date, b.version_end_date)
+
+    def test_full_clean(self):
+        """
+        A full clean will fail if some field allows null but not blank, and
+        no value is specified (version_end_date, for example).
+        """
+        b = B(name='someB')
+        try:
+            b.full_clean()
+        except ValidationError:
+            self.fail("Full clean did not succeed")
+
+
+class DeletionTest(TestCase):
+    def setUp(self):
+        self.b, self.t1, self.t2, self.t3 = set_up_one_object_with_3_versions()
+
+    def test_deleting(self):
+        """
+        When deleting an object in the database the object count should stay
+        constant as we are doing a soft-delete.
+        """
+        self.assertEqual(3, B.objects.all().count())
+
+        b = B.objects.current.first()
+        b.delete()
+
+        self.assertEqual(3, B.objects.all().count())
+
+    def test_deleting_non_current_version(self):
+        """
+        Deleting a previous version of an object is not possible and an
+        exception must be raised if such an action is attempted.
+        """
+        self.assertEqual(3, B.objects.all().count())
+
+        current = B.objects.current.first()
+        previous = B.objects.previous_version(current)
+
+        self.assertRaises(Exception, previous.delete)
+
+
+class CurrentVersionTest(TestCase):
+    def setUp(self):
+        self.b, self.t1, self.t2, self.t3 = set_up_one_object_with_3_versions()
+
+    def test_simple_case(self):
+        should_be_v3 = B.objects.current.first()
+
+        self.assertEqual('v3', should_be_v3.name)
+
+    def test_after_adding_new_version(self):
+        """
+        Create a new version of an object and tests that it has become the
+        'current' version
+        """
+        b = self.b.clone()
+        b.name = 'v4'
+        b.save()
+
+        sleep(0.1)
+
+        should_be_v4 = B.objects.current.first()
+        self.assertEqual('v4', should_be_v4.name)
+
+    def test_after_deleting_current_version(self):
+        """
+        Test that after deleting an object there is no 'current' version of
+        this object available.
+        """
+        self.b.delete()
+
+        self.assertIsNone(B.objects.current.first())
+
+    def test_getting_current_version(self):
+        """
+        Test that we can get the current version of any object by calling
+        the current_version() function
+        """
+        v2 = B.objects.as_of(self.t2).first()
+
+        should_be_v3 = B.objects.current_version(v2)
+        self.assertEqual('v3', should_be_v3.name)
+
+    def test_getting_current_version_but_deleted(self):
+        """
+        Test that the current_version returns nothing when called with a
+        deleted object
+        :return:
+        """
+        current = B.objects.current.first()
+        previous = B.objects.previous_version(current)
+        current.delete()
+
+        self.assertIsNone(B.objects.current_version(previous))
+        self.assertIsNone(B.objects.current_version(current))
+
+
+class VersionedQuerySetTest(TestCase):
+    def test_queryset_without_using_as_of(self):
+        b = B.objects.create(name='blabla')
+
+        b.name = 'blibli'
+        b.save()
+
+        o = B.objects.first()
+
+        self.assertEqual(b.name, o.name)
+
+    def test_queryset_using_as_of(self):
+        """
+        Creates one object having 3 versions and then tests that the as_of method
+        is returning the correct version when given the corresponding timestamp
+        """
+        b, t1, t2, t3 = set_up_one_object_with_3_versions()
+
+        o = B.objects.as_of(t1).first()
+        self.assertEqual('v1', o.name)
+
+        o = B.objects.as_of(t2).first()
+        self.assertEqual('v2', o.name)
+
+
+class VersionNavigationTest(TestCase):
+    def setUp(self):
+        self.b, self.t1, self.t2, self.t3 = set_up_one_object_with_3_versions()
+
+    def test_getting_next_version(self):
+        """
+        Get the first version of an object and navigate to the next version
+        until we reach the last version.
+        """
+        self.assertEqual(B.objects.all().count(), 3)
+
+        v1 = B.objects.as_of(self.t1).first()
+        self.assertEqual('v1', v1.name)
+
+        should_be_v2 = B.objects.next_version(v1)
+        self.assertEqual('v2', should_be_v2.name)
+        v2 = should_be_v2
+
+        should_be_v3 = B.objects.next_version(v2)
+        self.assertEqual('v3', should_be_v3.name)
+        v3 = should_be_v3
+
+        should_still_be_v3 = B.objects.next_version(v3)
+        self.assertEqual('v3', should_still_be_v3.name)
+
+    def test_getting_previous_version(self):
+        """
+        Get the last version of an object and navigate to the previous version
+        until we reach the first one.
+        """
+        v3 = B.objects.as_of(self.t3).first()
+        self.assertEqual('v3', v3.name)
+
+        should_be_v2 = B.objects.previous_version(v3)
+        self.assertEqual('v2', should_be_v2.name)
+        v2 = should_be_v2
+
+        should_be_v1 = B.objects.previous_version(v2)
+        self.assertEqual('v1', should_be_v1.name)
+        v1 = should_be_v1
+
+        should_still_be_v1 = B.objects.previous_version(v1)
+        self.assertEqual('v1', should_still_be_v1.name)
+
+    def test_getting_nonexistent_next_version(self):
+        """
+        Raise an error when trying to look up the next version of the last version of a deleted object.
+        """
+        v3 = B.objects.as_of(self.t3).first()
+        v3.delete()
+
+        self.assertRaises(ObjectDoesNotExist, lambda: B.objects.next_version(v3))
+
+    def test_getting_two_next_versions(self):
+        """
+        This should never happen, unless something went wrong REALLY bad;
+        For setting up this test case, we have to go under the hood of CleanerVersion and modify some timestamps.
+        Only like this it is possible to have two versions that follow one first version.
+        """
+        v1 = B.objects.as_of(self.t1).first()
+        v2 = B.objects.as_of(self.t2).first()
+        v3 = B.objects.as_of(self.t3).first()
+
+        v3.version_start_date = v2.version_start_date
+        v3.save()
+
+        self.assertRaises(MultipleObjectsReturned, lambda: B.objects.next_version(v1))
+
+    def test_getting_nonexistent_previous_version(self):
+        """
+        Raise an error when trying to look up the previous version of a version floating in emptyness.
+        This test case implies BAD modification under the hood of CleanerVersion, interrupting the continuity of an
+        object's versions through time.
+        """
+        v1 = B.objects.as_of(self.t1).first()
+        v2 = B.objects.as_of(self.t2).first()
+        v3 = B.objects.as_of(self.t3).first()
+
+        v2.version_end_date = v1.version_end_date
+        v2.save()
+
+        self.assertRaises(ObjectDoesNotExist, lambda: B.objects.previous_version(v3))
+
+    def test_getting_two_previous_versions(self):
+        """
+        This should never happen, unless something went wrong REALLY bad;
+        For setting up this test case, we have to go under the hood of CleanerVersion and modify some timestamps.
+        Only like this it is possible to have two versions that precede one last version.
+        """
+        v1 = B.objects.as_of(self.t1).first()
+        v2 = B.objects.as_of(self.t2).first()
+        v3 = B.objects.as_of(self.t3).first()
+
+        v1.version_end_date = v2.version_end_date
+        v1.save()
+
+        self.assertRaises(MultipleObjectsReturned, lambda: B.objects.previous_version(v3))
+
+
+class HistoricObjectsHandling(TestCase):
+    t0 = datetime.datetime(1980, 1, 1, tzinfo=utc)
+    t1 = datetime.datetime(1984, 4, 23, tzinfo=utc)
+    t2 = datetime.datetime(1985, 4, 23, tzinfo=utc)
+    in_between_t1_and_t2 = datetime.datetime(1984, 5, 30, tzinfo=utc)
+    after_t2 = datetime.datetime(1990, 1, 18, tzinfo=utc)
+
+    def test_create_using_manager(self):
+        b = B.objects._create_at(self.t1, name='someB')
+        self.assertEqual(self.t1, b.version_birth_date)
+        self.assertEqual(self.t1, b.version_start_date)
+
+        b_v2 = b._clone_at(self.t2)
+        self.assertEqual(b_v2.version_start_date, b.version_end_date)
+
+        # Query these objects
+        b_v1 = B.objects.as_of(self.in_between_t1_and_t2).get(name='someB')
+        self.assertFalse(b_v1.is_current)
+        self.assertEqual(b_v1.version_birth_date, b_v1.version_start_date)
+
+        b_v2 = B.objects.as_of(self.after_t2).get(name='someB')
+        self.assertTrue(b_v2.is_current)
+        self.assertNotEqual(b_v2.version_birth_date, b_v2.version_start_date)
+
+    def test_create_using_constructor(self):
+        b = B(name='someB').at(self.t1)
+        b.save()
+        self.assertEqual(self.t1, b.version_birth_date)
+        self.assertEqual(self.t1, b.version_start_date)
+
+        b_v2 = b._clone_at(self.t2)
+        self.assertEqual(b_v2.version_start_date, b.version_end_date)
+
+        # Query these objects
+        b_v1 = B.objects.as_of(self.in_between_t1_and_t2).get(name='someB')
+        self.assertFalse(b_v1.is_current)
+        self.assertEqual(b_v1.version_birth_date, b_v1.version_start_date)
+
+        b_v2 = B.objects.as_of(self.after_t2).get(name='someB')
+        self.assertTrue(b_v2.is_current)
+        self.assertNotEqual(b_v2.version_birth_date, b_v2.version_start_date)
+
+    def test_wrong_temporal_moving_of_objects(self):
+        """
+        Test that the restriction about creating "past objects' are operational:
+           - we cannot give something else than a timestamp to at()
+           - we cannot move anywhere in time an object
+        """
+        b = B(name='someB')
+        self.assertRaises(ValueError, lambda: b.at('bla'))
+        b.at(self.t1)
+        b.save()
+
+        b_new = b._clone_at(self.t2)
+        self.assertRaises(SuspiciousOperation, lambda: b.at(self.t2))
+        self.assertRaises(SuspiciousOperation, lambda: b_new.at(self.t1))
+
+    def test_cloning_before_birth_date(self):
+        b = B.objects._create_at(self.t1, name='someB')
+        self.assertRaises(ValueError, b._clone_at, *[self.t0])
+
+
+class OneToManyTest(TestCase):
+    def setUp(self):
+        self.team = Team.objects.create(name='t.v1')
+        self.p1 = Player.objects.create(name='p1.v1', team=self.team)
+        self.p2 = Player.objects.create(name='p2.v1', team=self.team)
+
+    def test_simple(self):
+        """
+        Test that we have 2 players in the team.
+        """
+        self.assertEqual(2, self.team.player_set.count())
+
+    def test_creating_new_version_of_the_team(self):
+        t1 = get_utc_now()
+        sleep(0.1)
+
+        team = self.team.clone()
+        team.name = 't.v2'
+        team.save()
+
+        t2 = get_utc_now()
+
+        self.assertEqual(2, Team.objects.all().count())
+
+        team = Team.objects.current.first()
+        # Either we can test the version_end_date...
+        self.assertIsNone(team.version_end_date)
+        # ...or the is_current property
+        self.assertTrue(team.is_current)
+
+        # We didn't change anything to the players so there must be 2 players in
+        # the team at time t1...
+        team_at_t1 = Team.objects.as_of(t1).first()
+        self.assertEqual(2, team_at_t1.player_set.count())
+
+        # ... and at time t2
+        team_at_t2 = Team.objects.as_of(t2).first()
+        self.assertEqual(2, team_at_t2.player_set.count())
+
+    def test_creating_new_version_of_the_player(self):
+        t1 = get_utc_now()
+        sleep(0.1)
+
+        p1 = self.p1.clone()
+        p1.name = 'p1.v2'
+        p1.save()
+
+        sleep(0.1)
+        t2 = get_utc_now()
+
+        self.assertEqual(3, Player.objects.all().count())
+
+        # at t1 there is no player named 'p1.v2'
+        team = Team.objects.as_of(t1).first()
+        self.assertEqual(2, team.player_set.count())
+        for player in team.player_set.all():
+            self.assertNotEqual(u'p1.v2', six.u(str(player.name)))
+
+        # at t2 there must be a 2 players and on of them is named 'p1.v2'
+        team = Team.objects.as_of(t2).first()
+        self.assertEqual(2, team.player_set.count())
+
+        if six.PY2:
+            matches = itertools.ifilter(lambda x: x.name == 'p1.v2', team.player_set.all())
+        if six.PY3:
+            matches = filter(lambda x: x.name == 'p1.v2', team.player_set.all())
+        self.assertEqual(1, len(list(matches)))
+
+    def test_adding_one_more_player_to_the_team(self):
+        t1 = get_utc_now()
+        sleep(0.1)
+
+        self.assertEqual(2, self.team.player_set.all().count())
+
+        new_player = Player.objects.create(name='p3.v1', team=self.team)
+        t2 = get_utc_now()
+
+        # there should be 3 players now in the team
+        self.assertEqual(3, self.team.player_set.all().count())
+
+        # there should be 2 players in the team at time t1
+        team_at_t1 = Team.objects.as_of(t1).first()
+        self.assertEqual(2, team_at_t1.player_set.all().count())
+
+        # there should be 3 players in the team at time t2
+        team_at_t2 = Team.objects.as_of(t2).first()
+        self.assertEqual(3, team_at_t2.player_set.all().count())
+
+    def test_removing_and_then_adding_again_same_player(self):
+        t1 = get_utc_now()
+        sleep(0.1)
+
+        p1 = self.p1.clone()
+        p1.team = None
+        p1.name = 'p1.v2'
+        p1.save()
+
+        t2 = get_utc_now()
+        sleep(0.1)
+
+        p1 = p1.clone()
+        p1.team = self.team
+        p1.name = 'p1.v3'
+        p1.save()
+
+        t3 = get_utc_now()
+
+        # there should be 2 players in the team if we put ourselves back at time t1
+        team_at_t1 = Team.objects.as_of(t1).first()
+        self.assertEqual(2, team_at_t1.player_set.all().count())
+
+        # there should be 1 players in the team if we put ourselves back at time t2
+        team_at_t2 = Team.objects.as_of(t2).first()
+        self.assertEqual(1, team_at_t2.player_set.all().count())
+        p1_at_t2 = Player.objects.as_of(t2).get(name__startswith='p1')
+        self.assertIsNone(p1_at_t2.team)
+
+        # there should be 2 players in the team if we put ourselves back at time t3
+        team_at_t3 = Team.objects.as_of(t3).first()
+        self.assertEqual(2, team_at_t3.player_set.all().count())
+
+    def test_removing_and_then_adding_again_same_player_on_related_object(self):
+        t1 = get_utc_now()
+        sleep(0.1)
+
+        self.team.player_set.remove(self.p1)
+
+        # Remember: self.p1 was cloned while removing and is not current anymore!!
+        # This property has to be documented, since it's critical for developers!
+        # At this time, there is no mean to replace the contents of self.p1 within the
+        # remove method
+        p1 = Player.objects.current.get(name__startswith='p1')
+        self.assertNotEqual(p1, self.p1)
+        p1.name = 'p1.v2'
+        p1.save()
+        self.p1 = p1
+
+        t2 = get_utc_now()
+        sleep(0.1)
+
+        self.team.player_set.add(self.p1)
+
+        # Same thing here! Don't rely on an added value!
+        p1 = Player.objects.current.get(name__startswith='p1')
+        p1.name = 'p1.v3'
+        p1.save()
+
+        t3 = get_utc_now()
+
+        # there should be 2 players in the team if we put ourselves back at time t1
+        team_at_t1 = Team.objects.as_of(t1).first()
+        self.assertEqual(2, team_at_t1.player_set.all().count())
+
+        # there should be 1 players in the team if we put ourselves back at time t2
+        team_at_t2 = Team.objects.as_of(t2).first()
+        self.assertEqual(1, team_at_t2.player_set.all().count())
+
+        # there should be 2 players in the team if we put ourselves back at time t3
+        team_at_t3 = Team.objects.as_of(t3).first()
+        self.assertEqual(2, team_at_t3.player_set.all().count())
+
+
+class SelfOneToManyTest(TestCase):
+    def setUp(self):
+        """
+        Setting up one parent folder having 2 sub-folders
+        """
+        parentdir_v1 = Directory.objects.create(name='parent.v1')
+
+        subdir1_v1 = Directory.objects.create(name='subdir1.v1')
+        subdir2_v1 = Directory.objects.create(name='subdir2.v1')
+
+        parentdir_v1.directory_set.add(subdir1_v1)
+        parentdir_v1.directory_set.add(subdir2_v1)
+
+    def test_creating_new_version_of_parent_directory(self):
+        t1 = get_utc_now()
+        sleep(0.1)
+
+        parentdir_v1 = Directory.objects.get(name__startswith='parent.v1')
+        self.assertTrue(parentdir_v1.is_current)
+        parentdir_v2 = parentdir_v1.clone()
+        parentdir_v2.name = 'parent.v2'
+        parentdir_v2.save()
+
+        t2 = get_utc_now()
+
+        # 1 parent dir, 2 subdirs, 2 new versions after linking then together
+        # and 1 new version of the parent dir
+        self.assertEqual(6, Directory.objects.all().count())
+
+        self.assertTrue(parentdir_v2.is_current)
+
+        # We didn't change anything to the subdirs so there must be 2 subdirs in
+        # the parent at time t1...
+        parentdir_at_t1 = Directory.objects.as_of(t1).get(name__startswith='parent')
+        self.assertEqual(2, parentdir_at_t1.directory_set.count())
+
+        # ... and at time t2
+        parentdir_at_t2 = Directory.objects.as_of(t2).get(name__startswith='parent')
+        self.assertEqual(2, parentdir_at_t2.directory_set.count())
+
+    def test_creating_new_version_of_the_subdir(self):
+        t1 = get_utc_now()
+
+        subdir1_v1 = Directory.objects.current.get(name__startswith='subdir1')
+        subdir1_v2 = subdir1_v1.clone()
+        subdir1_v2.name = 'subdir1.v2'
+        subdir1_v2.save()
+
+        sleep(0.1)
+        t2 = get_utc_now()
+
+        # Count all Directory instance versions:
+        # 3 initial versions + 2 subdirs added to parentdir (implies a clone) + 1 subdir1 that was explicitely cloned = 6
+        self.assertEqual(6, Directory.objects.all().count())
+
+        # at t1 there is no directory named 'subdir1.v2'
+        parentdir_at_t1 = Directory.objects.as_of(t1).get(name__startswith='parent')
+        self.assertEqual(2, parentdir_at_t1.directory_set.count())
+
+        for subdir in parentdir_at_t1.directory_set.all():
+            self.assertNotEqual('subdir1.v2', subdir.name)
+
+        # at t2 there must be 2 directories and ...
+        parentdir_at_t2 = Directory.objects.as_of(t2).get(name__startswith='parent')
+        self.assertEqual(2, parentdir_at_t2.directory_set.count())
+
+        # ... and one of then is named 'subdir1.v2'
+        if six.PY2:
+            matches = itertools.ifilter(lambda x: x.name == 'subdir1.v2', parentdir_at_t2.directory_set.all())
+        if six.PY3:
+            matches = filter(lambda x: x.name == 'subdir1.v2', parentdir_at_t2.directory_set.all())
+        self.assertEqual(1, len(list(matches)))
+
+    def test_adding_more_subdir(self):
+        t1 = get_utc_now()
+        sleep(0.1)
+
+        current_parentdir = Directory.objects.current.get(name__startswith='parent')
+        self.assertEqual(2, current_parentdir.directory_set.all().count())
+        sleep(0.1)
+
+        Directory.objects.create(name='subdir3.v1', parent=current_parentdir)
+        t2 = get_utc_now()
+
+        # There must be 3 subdirectories in the parent directory now. Since current_parentdir has never had an as_of
+        # specified, it will reflect the current state.
+        self.assertEqual(3, current_parentdir.directory_set.all().count())
+
+        # there should be 2 directories in the parent directory at time t1
+        parentdir_at_t1 = Directory.objects.as_of(t1).filter(name='parent.v1').first()
+        self.assertEqual(2, parentdir_at_t1.directory_set.all().count())
+
+        # there should be 3 directories in the parent directory at time t2
+        parentdir_at_t2 = Directory.objects.as_of(t2).filter(name='parent.v1').first()
+        self.assertEqual(3, parentdir_at_t2.directory_set.all().count())
+
+    def test_removing_and_then_adding_again_same_subdir(self):
+        t1 = get_utc_now()
+        sleep(0.1)
+
+        subdir1_v1 = Directory.objects.current.get(name__startswith='subdir1')
+        subdir1_v2 = subdir1_v1.clone()
+        subdir1_v2.parent = None
+        subdir1_v2.name = 'subdir1.v2'
+        subdir1_v2.save()
+
+        t2 = get_utc_now()
+        sleep(0.1)
+
+        current_parentdir = Directory.objects.current.get(name__startswith='parent')
+        subdir1_v3 = subdir1_v2.clone()
+        subdir1_v3.parent = current_parentdir
+        subdir1_v3.name = 'subdir1.v3'
+        subdir1_v3.save()
+
+        t3 = get_utc_now()
+
+        # there should be 2 directories in the parent directory at time t1
+        parentdir_at_t1 = Directory.objects.as_of(t1).get(name__startswith='parent')
+        self.assertEqual(2, parentdir_at_t1.directory_set.all().count())
+
+        # there should be 1 directory in the parent directory at time t2
+        parentdir_at_t2 = Directory.objects.as_of(t2).get(name__startswith='parent')
+        self.assertEqual(1, parentdir_at_t2.directory_set.all().count())
+
+        # there should be 2 directories in the parent directory at time t3
+        parentdir_at_t3 = Directory.objects.as_of(t3).get(name__startswith='parent')
+        self.assertEqual(2, parentdir_at_t3.directory_set.all().count())
+
+
+class OneToManyFilteringTest(TestCase):
+    def setUp(self):
+        team = Team.objects.create(name='t.v1')
+        p1 = Player.objects.create(name='p1.v1', team=team)
+        p2 = Player.objects.create(name='p2.v1', team=team)
+
+        self.t1 = get_utc_now()
+        sleep(0.1)
+
+        team.player_set.remove(p2)
+
+        p2 = Player.objects.current.get(name='p2.v1')
+        p2.name = 'p2.v2'
+        p2.save()
+
+        self.t2 = get_utc_now()
+        sleep(0.1)
+
+        team.player_set.remove(p1)
+
+        p1 = Player.objects.current.get(name='p1.v1')
+        p1.name = 'p1.v2'
+        p1.save()
+
+        self.t3 = get_utc_now()
+        sleep(0.1)
+
+        # Let's get those players back into the game!
+        team.player_set.add(p1)
+        team.player_set.add(p2)
+
+        p1 = Player.objects.current.get(name__startswith='p1')
+        p1.name = 'p1.v3'
+        p1.save()
+
+        p2 = Player.objects.current.get(name__startswith='p2')
+        p2.name = 'p2.v3'
+        p2.save()
+
+        self.t4 = get_utc_now()
+        sleep(0.1)
+
+        p1.delete()
+
+        self.t5 = get_utc_now()
+
+    def test_filtering_on_the_other_side_of_the_relation(self):
+        self.assertEqual(1, Team.objects.all().count())
+        self.assertEqual(1, Team.objects.as_of(self.t1).all().count())
+        self.assertEqual(3, Player.objects.filter(name__startswith='p1').all().count())
+        self.assertEqual(3, Player.objects.filter(name__startswith='p2').all().count())
+        self.assertEqual(1, Player.objects.as_of(self.t1).filter(name='p1.v1').all().count())
+        self.assertEqual(1, Player.objects.as_of(self.t1).filter(name='p2.v1').all().count())
+
+        # at t1 there should be one team with two players
+        team_p1 = Team.objects.as_of(self.t1).filter(player__name='p1.v1').first()
+        self.assertIsNotNone(team_p1)
+        team_p2 = Team.objects.as_of(self.t1).filter(player__name='p2.v1').first()
+        self.assertIsNotNone(team_p2)
+
+        # at t2 there should be one team with one single player called 'p1.v1'
+        team_p1 = Team.objects.as_of(self.t2).filter(player__name='p1.v1').first()
+        team_p2 = Team.objects.as_of(self.t2).filter(player__name='p2.v2').first()
+        self.assertIsNotNone(team_p1)
+        self.assertEqual(team_p1.name, 't.v1')
+        self.assertEqual(1, team_p1.player_set.count())
+        self.assertIsNone(team_p2)
+
+        # at t3 there should be one team with no players
+        team_p1 = Team.objects.as_of(self.t3).filter(player__name='p1.v2').first()
+        team_p2 = Team.objects.as_of(self.t3).filter(player__name='p2.v2').first()
+        self.assertIsNone(team_p1)
+        self.assertIsNone(team_p2)
+
+        # at t4 there should be one team with two players again!
+        team_p1 = Team.objects.as_of(self.t4).filter(player__name='p1.v3').first()
+        team_p2 = Team.objects.as_of(self.t4).filter(player__name='p2.v3').first()
+        self.assertIsNotNone(team_p1)
+        self.assertEqual(team_p1.name, 't.v1')
+        self.assertIsNotNone(team_p2)
+        self.assertEqual(team_p2.name, 't.v1')
+        self.assertEqual(team_p1, team_p2)
+        self.assertEqual(2, team_p1.player_set.count())
+
+    def test_simple_filter_using_q_objects(self):
+        """
+        This tests explicitely the filtering of a versioned object using Q objects.
+        However, since this is done implicetly with every call to 'as_of', this test is redundant but is kept for
+        explicit test coverage
+        """
+        t1_players = list(
+            Player.objects.as_of(self.t1).filter(Q(name__startswith='p1') | Q(name__startswith='p2')).values_list('name',
+                                                                                                             flat=True))
+        self.assertEqual(2, len(t1_players))
+        self.assertListEqual(sorted(t1_players), sorted(['p1.v1', 'p2.v1']))
+
+    def test_filtering_for_deleted_player_at_t5(self):
+        team_none = Team.objects.as_of(self.t5).filter(player__name__startswith='p1').first()
+        self.assertIsNone(team_none)
+
+    @skipUnless(connection.vendor == 'sqlite', 'SQL is database specific, only sqlite is tested here.')
+    def test_query_created_by_filtering_for_deleted_player_at_t5(self):
+        team_none_queryset = Team.objects.as_of(self.t5).filter(player__name__startswith='p1')
+        team_none_query = str(team_none_queryset.query)
+
+        team_table = Team._meta.db_table
+        player_table = Player._meta.db_table
+        t5_utc_w_tz = str(self.t5)
+        t5_utc_wo_tz = t5_utc_w_tz[:-6]
+
+        expected_query = """
+            SELECT
+                "{team_table}"."id",
+                "{team_table}"."identity",
+                "{team_table}"."version_start_date",
+                "{team_table}"."version_end_date",
+                "{team_table}"."version_birth_date",
+                "{team_table}"."name"
+            FROM "{team_table}"
+            INNER JOIN
+                "{player_table}" ON (
+                    "{team_table}"."id" = "{player_table}"."team_id"
+                    AND ((
+                        {player_table}.version_start_date <= {ts}
+                        AND (
+                            {player_table}.version_end_date > {ts}
+                            OR {player_table}.version_end_date is NULL
+                        )
+                    ))
+                )
+            WHERE (
+                (
+                    "{team_table}"."version_end_date" > {ts_wo_tz}
+                    OR "{team_table}"."version_end_date" IS NULL
+                )
+                AND "{team_table}"."version_start_date" <= {ts_wo_tz}
+                AND "{player_table}"."name" LIKE p1% ESCAPE '\\\'
+            )
+        """.format(ts=t5_utc_w_tz, ts_wo_tz=t5_utc_wo_tz, team_table=team_table, player_table=player_table)
+        self.assertStringEqualIgnoreWhiteSpaces(expected_query, team_none_query)
 
 
 class MultiM2MTest(TestCase):
@@ -380,738 +1152,6 @@ class MultiM2MToSameTest(TestCase):
         self.assertEqual(erika_t3.science_teachers.first().name, 'Mr. Kazmirek')
 
 
-class HistoricM2MOperationsTests(TestCase):
-    def setUp(self):
-        # Set up a situation on 23.4.1984
-        ts = datetime.datetime(1984, 4, 23, tzinfo=utc)
-        big_brother = Observer.objects._create_at(ts, name='BigBrother')
-        self.big_brother = big_brother
-        subject = Subject.objects._create_at(ts, name='Winston Smith')
-        big_brother.subjects.add_at(ts, subject)
-
-        # Remove the relationship on 23.5.1984
-        ts_a_month_later = ts + datetime.timedelta(days=30)
-        big_brother.subjects.remove_at(ts_a_month_later, subject)
-
-    def test_observer_subject_relationship_is_active_in_early_1984(self):
-        ts = datetime.datetime(1984, 5, 1, tzinfo=utc)
-        observer = Observer.objects.as_of(ts).get()
-        self.assertEqual(observer.name, 'BigBrother')
-        subjects = observer.subjects.all()
-        self.assertEqual(len(subjects), 1)
-        self.assertEqual(subjects[0].name, 'Winston Smith')
-
-    def test_observer_subject_relationship_is_inactive_in_late_1984(self):
-        ts = datetime.datetime(1984, 8, 16, tzinfo=utc)
-        observer = Observer.objects.as_of(ts).get()
-        self.assertEqual(observer.name, 'BigBrother')
-        subjects = observer.subjects.all()
-        self.assertEqual(len(subjects), 0)
-        subject = Subject.objects.as_of(ts).get()
-        self.assertEqual(subject.name, 'Winston Smith')
-
-    def test_simple(self):
-        self.big_brother.subjects.all().first()
-
-
-def set_up_one_object_with_3_versions():
-    b = B.objects.create(name='v1')
-
-    sleep(0.1)
-    t1 = get_utc_now()
-
-    b = b.clone()
-    b.name = 'v2'
-    b.save()
-
-    sleep(0.1)
-    t2 = get_utc_now()
-
-    b = b.clone()
-    b.name = 'v3'
-    b.save()
-
-    sleep(0.1)
-    t3 = get_utc_now()
-
-    return b, t1, t2, t3
-
-
-class VersionedQuerySetTest(TestCase):
-    def test_queryset_without_using_as_of(self):
-        b = B.objects.create(name='blabla')
-
-        b.name = 'blibli'
-        b.save()
-
-        o = B.objects.first()
-
-        self.assertEqual(b.name, o.name)
-
-    def test_queryset_using_as_of(self):
-        """
-        Creates one object having 3 versions and then tests that the as_of method
-        is returning the correct version when given the corresponding timestamp
-        """
-        b, t1, t2, t3 = set_up_one_object_with_3_versions()
-
-        o = B.objects.as_of(t1).first()
-        self.assertEqual('v1', o.name)
-
-        o = B.objects.as_of(t2).first()
-        self.assertEqual('v2', o.name)
-
-
-class VersionNavigationTest(TestCase):
-    def setUp(self):
-        self.b, self.t1, self.t2, self.t3 = set_up_one_object_with_3_versions()
-
-    def test_getting_next_version(self):
-        """
-        Get the first version of an object and navigate to the next version
-        until we reach the last version.
-        """
-        self.assertEqual(B.objects.all().count(), 3)
-
-        v1 = B.objects.as_of(self.t1).first()
-        self.assertEqual('v1', v1.name)
-
-        should_be_v2 = B.objects.next_version(v1)
-        self.assertEqual('v2', should_be_v2.name)
-        v2 = should_be_v2
-
-        should_be_v3 = B.objects.next_version(v2)
-        self.assertEqual('v3', should_be_v3.name)
-        v3 = should_be_v3
-
-        should_still_be_v3 = B.objects.next_version(v3)
-        self.assertEqual('v3', should_still_be_v3.name)
-
-    def test_getting_previous_version(self):
-        """
-        Get the last version of an object and navigate to the previous version
-        until we reach the first one.
-        """
-        v3 = B.objects.as_of(self.t3).first()
-        self.assertEqual('v3', v3.name)
-
-        should_be_v2 = B.objects.previous_version(v3)
-        self.assertEqual('v2', should_be_v2.name)
-        v2 = should_be_v2
-
-        should_be_v1 = B.objects.previous_version(v2)
-        self.assertEqual('v1', should_be_v1.name)
-        v1 = should_be_v1
-
-        should_still_be_v1 = B.objects.previous_version(v1)
-        self.assertEqual('v1', should_still_be_v1.name)
-
-    def test_getting_nonexistent_next_version(self):
-        """
-        Raise an error when trying to look up the next version of the last version of a deleted object.
-        """
-        v3 = B.objects.as_of(self.t3).first()
-        v3.delete()
-
-        self.assertRaises(ObjectDoesNotExist, lambda: B.objects.next_version(v3))
-
-    def test_getting_two_next_versions(self):
-        """
-        This should never happen, unless something went wrong REALLY bad;
-        For setting up this test case, we have to go under the hood of CleanerVersion and modify some timestamps.
-        Only like this it is possible to have two versions that follow one first version.
-        """
-        v1 = B.objects.as_of(self.t1).first()
-        v2 = B.objects.as_of(self.t2).first()
-        v3 = B.objects.as_of(self.t3).first()
-
-        v3.version_start_date = v2.version_start_date
-        v3.save()
-
-        self.assertRaises(MultipleObjectsReturned, lambda: B.objects.next_version(v1))
-
-    def test_getting_nonexistent_previous_version(self):
-        """
-        Raise an error when trying to look up the previous version of a version floating in emptyness.
-        This test case implies BAD modification under the hood of CleanerVersion, interrupting the continuity of an
-        object's versions through time.
-        """
-        v1 = B.objects.as_of(self.t1).first()
-        v2 = B.objects.as_of(self.t2).first()
-        v3 = B.objects.as_of(self.t3).first()
-
-        v2.version_end_date = v1.version_end_date
-        v2.save()
-
-        self.assertRaises(ObjectDoesNotExist, lambda: B.objects.previous_version(v3))
-
-    def test_getting_two_previous_versions(self):
-        """
-        This should never happen, unless something went wrong REALLY bad;
-        For setting up this test case, we have to go under the hood of CleanerVersion and modify some timestamps.
-        Only like this it is possible to have two versions that precede one last version.
-        """
-        v1 = B.objects.as_of(self.t1).first()
-        v2 = B.objects.as_of(self.t2).first()
-        v3 = B.objects.as_of(self.t3).first()
-
-        v1.version_end_date = v2.version_end_date
-        v1.save()
-
-        self.assertRaises(MultipleObjectsReturned, lambda: B.objects.previous_version(v3))
-
-
-class CreationTest(TestCase):
-    def test_create_using_manager(self):
-        b = B.objects.create(name='someB')
-        self.assertTrue(isinstance(b, Versionable))
-        self.assertEqual(b.version_start_date, b.version_birth_date)
-
-        b_new = b.clone()
-        self.assertTrue(isinstance(b_new, Versionable))
-        self.assertEqual(b_new.version_start_date, b.version_end_date)
-
-    def test_create_using_constructor(self):
-        b = B(name='someB')
-        b.save()
-        self.assertTrue(isinstance(b, Versionable))
-        self.assertEqual(b.version_start_date, b.version_birth_date)
-
-        b_new = b.clone()
-        self.assertTrue(isinstance(b_new, Versionable))
-        self.assertEqual(b_new.version_start_date, b.version_end_date)
-
-    def test_full_clean(self):
-        """
-        A full clean will fail if some field allows null but not blank, and
-        no value is specified (version_end_date, for example).
-        """
-        b = B(name='someB')
-        try:
-            b.full_clean()
-        except ValidationError:
-            self.fail("Full clean did not succeed")
-
-
-class DeletionTest(TestCase):
-    def setUp(self):
-        self.b, self.t1, self.t2, self.t3 = set_up_one_object_with_3_versions()
-
-    def test_deleting(self):
-        """
-        When deleting an object in the database the object count should stay
-        constant as we are doing a soft-delete.
-        """
-        self.assertEqual(3, B.objects.all().count())
-
-        b = B.objects.current.first()
-        b.delete()
-
-        self.assertEqual(3, B.objects.all().count())
-
-    def test_deleting_non_current_version(self):
-        """
-        Deleting a previous version of an object is not possible and an
-        exception must be raised if such an action is attempted.
-        """
-        self.assertEqual(3, B.objects.all().count())
-
-        current = B.objects.current.first()
-        previous = B.objects.previous_version(current)
-
-        self.assertRaises(Exception, previous.delete)
-
-
-class HistoricObjectsHandling(TestCase):
-    t0 = datetime.datetime(1980, 1, 1, tzinfo=utc)
-    t1 = datetime.datetime(1984, 4, 23, tzinfo=utc)
-    t2 = datetime.datetime(1985, 4, 23, tzinfo=utc)
-    in_between_t1_and_t2 = datetime.datetime(1984, 5, 30, tzinfo=utc)
-    after_t2 = datetime.datetime(1990, 1, 18, tzinfo=utc)
-
-    def test_create_using_manager(self):
-        b = B.objects._create_at(self.t1, name='someB')
-        self.assertEqual(self.t1, b.version_birth_date)
-        self.assertEqual(self.t1, b.version_start_date)
-
-        b_v2 = b._clone_at(self.t2)
-        self.assertEqual(b_v2.version_start_date, b.version_end_date)
-
-        # Query these objects
-        b_v1 = B.objects.as_of(self.in_between_t1_and_t2).get(name='someB')
-        self.assertFalse(b_v1.is_current)
-        self.assertEqual(b_v1.version_birth_date, b_v1.version_start_date)
-
-        b_v2 = B.objects.as_of(self.after_t2).get(name='someB')
-        self.assertTrue(b_v2.is_current)
-        self.assertNotEqual(b_v2.version_birth_date, b_v2.version_start_date)
-
-    def test_create_using_constructor(self):
-        b = B(name='someB').at(self.t1)
-        b.save()
-        self.assertEqual(self.t1, b.version_birth_date)
-        self.assertEqual(self.t1, b.version_start_date)
-
-        b_v2 = b._clone_at(self.t2)
-        self.assertEqual(b_v2.version_start_date, b.version_end_date)
-
-        # Query these objects
-        b_v1 = B.objects.as_of(self.in_between_t1_and_t2).get(name='someB')
-        self.assertFalse(b_v1.is_current)
-        self.assertEqual(b_v1.version_birth_date, b_v1.version_start_date)
-
-        b_v2 = B.objects.as_of(self.after_t2).get(name='someB')
-        self.assertTrue(b_v2.is_current)
-        self.assertNotEqual(b_v2.version_birth_date, b_v2.version_start_date)
-
-    def test_wrong_temporal_moving_of_objects(self):
-        """
-        Test that the restriction about creating "past objects' are operational:
-           - we cannot give something else than a timestamp to at()
-           - we cannot move anywhere in time an object
-        """
-        b = B(name='someB')
-        self.assertRaises(ValueError, lambda: b.at('bla'))
-        b.at(self.t1)
-        b.save()
-
-        b_new = b._clone_at(self.t2)
-        self.assertRaises(SuspiciousOperation, lambda: b.at(self.t2))
-        self.assertRaises(SuspiciousOperation, lambda: b_new.at(self.t1))
-
-    def test_cloning_before_birth_date(self):
-        b = B.objects._create_at(self.t1, name='someB')
-        self.assertRaises(ValueError, b._clone_at, *[self.t0])
-
-
-class CurrentVersionTest(TestCase):
-    def setUp(self):
-        self.b, self.t1, self.t2, self.t3 = set_up_one_object_with_3_versions()
-
-    def test_simple_case(self):
-        should_be_v3 = B.objects.current.first()
-
-        self.assertEqual('v3', should_be_v3.name)
-
-    def test_after_adding_new_version(self):
-        """
-        Create a new version of an object and tests that it has become the
-        'current' version
-        """
-        b = self.b.clone()
-        b.name = 'v4'
-        b.save()
-
-        sleep(0.1)
-
-        should_be_v4 = B.objects.current.first()
-        self.assertEqual('v4', should_be_v4.name)
-
-    def test_after_deleting_current_version(self):
-        """
-        Test that after deleting an object there is no 'current' version of
-        this object available.
-        """
-        self.b.delete()
-
-        self.assertIsNone(B.objects.current.first())
-
-    def test_getting_current_version(self):
-        """
-        Test that we can get the current version of any object by calling
-        the current_version() function
-        """
-        v2 = B.objects.as_of(self.t2).first()
-
-        should_be_v3 = B.objects.current_version(v2)
-        self.assertEqual('v3', should_be_v3.name)
-
-    def test_getting_current_version_but_deleted(self):
-        """
-        Test that the current_version returns nothing when called with a
-        deleted object
-        :return:
-        """
-        current = B.objects.current.first()
-        previous = B.objects.previous_version(current)
-        current.delete()
-
-        self.assertIsNone(B.objects.current_version(previous))
-        self.assertIsNone(B.objects.current_version(current))
-
-
-class OneToManyTest(TestCase):
-    def setUp(self):
-        self.team = Team.objects.create(name='t.v1')
-        self.p1 = Player.objects.create(name='p1.v1', team=self.team)
-        self.p2 = Player.objects.create(name='p2.v1', team=self.team)
-
-    def test_simple(self):
-        """
-        Test that we have 2 players in the team.
-        """
-        self.assertEqual(2, self.team.player_set.count())
-
-    def test_creating_new_version_of_the_team(self):
-        t1 = get_utc_now()
-        sleep(0.1)
-
-        team = self.team.clone()
-        team.name = 't.v2'
-        team.save()
-
-        t2 = get_utc_now()
-
-        self.assertEqual(2, Team.objects.all().count())
-
-        team = Team.objects.current.first()
-        # Either we can test the version_end_date...
-        self.assertIsNone(team.version_end_date)
-        # ...or the is_current property
-        self.assertTrue(team.is_current)
-
-        # We didn't change anything to the players so there must be 2 players in
-        # the team at time t1...
-        team_at_t1 = Team.objects.as_of(t1).first()
-        self.assertEqual(2, team_at_t1.player_set.count())
-
-        # ... and at time t2
-        team_at_t2 = Team.objects.as_of(t2).first()
-        self.assertEqual(2, team_at_t2.player_set.count())
-
-    def test_creating_new_version_of_the_player(self):
-        t1 = get_utc_now()
-        sleep(0.1)
-
-        p1 = self.p1.clone()
-        p1.name = 'p1.v2'
-        p1.save()
-
-        sleep(0.1)
-        t2 = get_utc_now()
-
-        self.assertEqual(3, Player.objects.all().count())
-
-        # at t1 there is no player named 'p1.v2'
-        team = Team.objects.as_of(t1).first()
-        self.assertEqual(2, team.player_set.count())
-        for player in team.player_set.all():
-            self.assertNotEqual(u'p1.v2', six.u(str(player.name)))
-
-        # at t2 there must be a 2 players and on of them is named 'p1.v2'
-        team = Team.objects.as_of(t2).first()
-        self.assertEqual(2, team.player_set.count())
-
-        if six.PY2:
-            matches = itertools.ifilter(lambda x: x.name == 'p1.v2', team.player_set.all())
-        if six.PY3:
-            matches = filter(lambda x: x.name == 'p1.v2', team.player_set.all())
-        self.assertEqual(1, len(list(matches)))
-
-    def test_adding_more_player_to_the_team(self):
-        t1 = get_utc_now()
-        sleep(0.1)
-
-        self.assertEqual(2, self.team.player_set.all().count())
-
-        new_player = Player.objects.create(name='p3.v1', team=self.team)
-        t2 = get_utc_now()
-
-        # there should be 3 players now in the team
-        self.assertEqual(3, self.team.player_set.all().count())
-
-        # there should be 2 players in the team at time t1
-        team_at_t1 = Team.objects.as_of(t1).first()
-        self.assertEqual(2, team_at_t1.player_set.all().count())
-
-        # there should be 3 players in the team at time t2
-        team_at_t2 = Team.objects.as_of(t2).first()
-        self.assertEqual(3, team_at_t2.player_set.all().count())
-
-    def test_removing_and_then_adding_again_same_player(self):
-        t1 = get_utc_now()
-        sleep(0.1)
-
-        p1 = self.p1.clone()
-        p1.team = None
-        p1.name = 'p1.v2'
-        p1.save()
-
-        t2 = get_utc_now()
-        sleep(0.1)
-
-        p1 = p1.clone()
-        p1.team = self.team
-        p1.name = 'p1.v3'
-        p1.save()
-
-        t3 = get_utc_now()
-
-        # there should be 2 players in the team if we put ourselves back at time t1
-        team_at_t1 = Team.objects.as_of(t1).first()
-        self.assertEqual(2, team_at_t1.player_set.all().count())
-
-        # there should be 1 players in the team if we put ourselves back at time t2
-        team_at_t2 = Team.objects.as_of(t2).first()
-        self.assertEqual(1, team_at_t2.player_set.all().count())
-        p1_at_t2 = Player.objects.as_of(t2).get(name__startswith='p1')
-        self.assertIsNone(p1_at_t2.team)
-
-        # there should be 2 players in the team if we put ourselves back at time t3
-        team_at_t3 = Team.objects.as_of(t3).first()
-        self.assertEqual(2, team_at_t3.player_set.all().count())
-
-    def test_removing_and_then_adding_again_same_player_on_related_object(self):
-        t1 = get_utc_now()
-        sleep(0.1)
-
-        self.team.player_set.remove(self.p1)
-
-        # Remember: self.p1 was cloned while removing and is not current anymore!!
-        # This property has to be documented, since it's critical for developers!
-        # At this time, there is no mean to replace the contents of self.p1 within the
-        # remove method
-        p1 = Player.objects.current.get(name__startswith='p1')
-        self.assertNotEqual(p1, self.p1)
-        p1.name = 'p1.v2'
-        p1.save()
-        self.p1 = p1
-
-        t2 = get_utc_now()
-        sleep(0.1)
-
-        self.team.player_set.add(self.p1)
-
-        # Same thing here! Don't rely on an added value!
-        p1 = Player.objects.current.get(name__startswith='p1')
-        p1.name = 'p1.v3'
-        p1.save()
-
-        t3 = get_utc_now()
-
-        # there should be 2 players in the team if we put ourselves back at time t1
-        team_at_t1 = Team.objects.as_of(t1).first()
-        self.assertEqual(2, team_at_t1.player_set.all().count())
-
-        # there should be 1 players in the team if we put ourselves back at time t2
-        team_at_t2 = Team.objects.as_of(t2).first()
-        self.assertEqual(1, team_at_t2.player_set.all().count())
-
-        # there should be 2 players in the team if we put ourselves back at time t3
-        team_at_t3 = Team.objects.as_of(t3).first()
-        self.assertEqual(2, team_at_t3.player_set.all().count())
-
-    def test_filtering_on_the_other_side_of_the_relation(self):
-        t1 = get_utc_now()
-        sleep(0.1)
-
-        p2 = Player.objects.get(name='p2.v1')
-        self.team.player_set.remove(p2)
-
-        t2 = get_utc_now()
-        sleep(0.1)
-
-        p1 = Player.objects.get(name='p1.v1')
-        self.team.player_set.remove(p1)
-
-        t3 = get_utc_now()
-        sleep(0.1)
-
-        # Let's get those players back into the game!
-        p1 = Player.objects.current.get(name='p1.v1')
-        p2 = Player.objects.current.get(name='p2.v1')
-        self.team.player_set.add(p1)
-        self.team.player_set.add(p2)
-
-        t4 = get_utc_now()
-
-        self.assertEqual(1, Team.objects.all().count())
-        self.assertEqual(1, Team.objects.as_of(t1).all().count())
-        self.assertEqual(3, Player.objects.filter(name='p1.v1').all().count())
-        self.assertEqual(3, Player.objects.filter(name='p2.v1').all().count())
-        self.assertEqual(1, Player.objects.as_of(t1).filter(name='p1.v1').all().count())
-        self.assertEqual(1, Player.objects.as_of(t1).filter(name='p2.v1').all().count())
-
-        # at t1 there should be one team with two players
-        p1 = Team.objects.as_of(t1).filter(player__name='p1.v1').first()
-        self.assertIsNotNone(p1)
-        p2 = Team.objects.as_of(t1).filter(player__name='p2.v1').first()
-        self.assertIsNotNone(p2)
-
-        # at t2 there should be one team with one single player called 'p1.v1'
-        p1 = Team.objects.as_of(t2).filter(player__name='p1.v1').first()
-        p2 = Team.objects.as_of(t2).filter(player__name='p2.v1').first()
-        self.assertIsNotNone(p1)
-        self.assertIsNone(p2)
-
-        # at t3 there should be one team with no players
-        p1 = Team.objects.as_of(t3).filter(player__name='p1.v1').first()
-        p2 = Team.objects.as_of(t3).filter(player__name='p2.v1').first()
-        self.assertIsNone(p1)
-        self.assertIsNone(p2)
-
-        # at t4 there should be one team with two players again!
-        p1 = Team.objects.as_of(t4).filter(player__name='p1.v1').first()
-        p2 = Team.objects.as_of(t4).filter(player__name='p2.v1').first()
-        self.assertIsNotNone(p1)
-        self.assertIsNotNone(p2)
-
-    def test_simple_filter_using_q_objects(self):
-        """
-        This tests explicitely the filtering of a versioned object using Q objects.
-        However, since this is done implicetly with every call to 'as_of', this test is redundant but is kept for
-        explicit test coverage
-        """
-        t1 = get_utc_now()
-        sleep(0.1)
-
-        p1 = Player.objects.current.get(name__startswith='p1')
-        self.team.player_set.remove(p1)
-
-        p1 = Player.objects.current.get(name__startswith='p1')
-        p1.name = 'p1.v2'
-        p1.save()
-
-        t2 = get_utc_now()
-        sleep(0.1)
-
-        t1_players = list(
-            Player.objects.as_of(t1).filter(Q(name__startswith='p1') | Q(name__startswith='p2')).values_list('name',
-                                                                                                             flat=True))
-        self.assertEqual(2, len(t1_players))
-        self.assertListEqual(sorted(t1_players), sorted(['p1.v1', 'p2.v1']))
-
-
-class SelfOneToManyTest(TestCase):
-    def setUp(self):
-        """
-        Setting up one parent folder having 2 sub-folders
-        """
-        parentdir_v1 = Directory.objects.create(name='parent.v1')
-
-        subdir1_v1 = Directory.objects.create(name='subdir1.v1')
-        subdir2_v1 = Directory.objects.create(name='subdir2.v1')
-
-        parentdir_v1.directory_set.add(subdir1_v1)
-        parentdir_v1.directory_set.add(subdir2_v1)
-
-    def test_creating_new_version_of_parent_directory(self):
-        t1 = get_utc_now()
-        sleep(0.1)
-
-        parentdir_v1 = Directory.objects.get(name__startswith='parent.v1')
-        self.assertTrue(parentdir_v1.is_current)
-        parentdir_v2 = parentdir_v1.clone()
-        parentdir_v2.name = 'parent.v2'
-        parentdir_v2.save()
-
-        t2 = get_utc_now()
-
-        # 1 parent dir, 2 subdirs, 2 new versions after linking then together
-        # and 1 new version of the parent dir
-        self.assertEqual(6, Directory.objects.all().count())
-
-        self.assertTrue(parentdir_v2.is_current)
-
-        # We didn't change anything to the subdirs so there must be 2 subdirs in
-        # the parent at time t1...
-        parentdir_at_t1 = Directory.objects.as_of(t1).get(name__startswith='parent')
-        self.assertEqual(2, parentdir_at_t1.directory_set.count())
-
-        # ... and at time t2
-        parentdir_at_t2 = Directory.objects.as_of(t2).get(name__startswith='parent')
-        self.assertEqual(2, parentdir_at_t2.directory_set.count())
-
-    def test_creating_new_version_of_the_subdir(self):
-        t1 = get_utc_now()
-
-        subdir1_v1 = Directory.objects.current.get(name__startswith='subdir1')
-        subdir1_v2 = subdir1_v1.clone()
-        subdir1_v2.name = 'subdir1.v2'
-        subdir1_v2.save()
-
-        sleep(0.1)
-        t2 = get_utc_now()
-
-        # Count all Directory instance versions:
-        # 3 initial versions + 2 subdirs added to parentdir (implies a clone) + 1 subdir1 that was explicitely cloned = 6
-        self.assertEqual(6, Directory.objects.all().count())
-
-        # at t1 there is no directory named 'subdir1.v2'
-        parentdir_at_t1 = Directory.objects.as_of(t1).get(name__startswith='parent')
-        self.assertEqual(2, parentdir_at_t1.directory_set.count())
-
-        for subdir in parentdir_at_t1.directory_set.all():
-            self.assertNotEqual('subdir1.v2', subdir.name)
-
-        # at t2 there must be 2 directories and ...
-        parentdir_at_t2 = Directory.objects.as_of(t2).get(name__startswith='parent')
-        self.assertEqual(2, parentdir_at_t2.directory_set.count())
-
-        # ... and one of then is named 'subdir1.v2'
-        if six.PY2:
-            matches = itertools.ifilter(lambda x: x.name == 'subdir1.v2', parentdir_at_t2.directory_set.all())
-        if six.PY3:
-            matches = filter(lambda x: x.name == 'subdir1.v2', parentdir_at_t2.directory_set.all())
-        self.assertEqual(1, len(list(matches)))
-
-    def test_adding_more_subdir(self):
-        t1 = get_utc_now()
-        sleep(0.1)
-
-        current_parentdir = Directory.objects.current.get(name__startswith='parent')
-        self.assertEqual(2, current_parentdir.directory_set.all().count())
-        sleep(0.1)
-
-        Directory.objects.create(name='subdir3.v1', parent=current_parentdir)
-        t2 = get_utc_now()
-
-        # There must be 3 subdirectories in the parent directory now. Since current_parentdir has never had an as_of
-        # specified, it will reflect the current state.
-        self.assertEqual(3, current_parentdir.directory_set.all().count())
-
-        # there should be 2 directories in the parent directory at time t1
-        parentdir_at_t1 = Directory.objects.as_of(t1).filter(name='parent.v1').first()
-        self.assertEqual(2, parentdir_at_t1.directory_set.all().count())
-
-        # there should be 3 directories in the parent directory at time t2
-        parentdir_at_t2 = Directory.objects.as_of(t2).filter(name='parent.v1').first()
-        self.assertEqual(3, parentdir_at_t2.directory_set.all().count())
-
-    def test_removing_and_then_adding_again_same_subdir(self):
-        t1 = get_utc_now()
-        sleep(0.1)
-
-        subdir1_v1 = Directory.objects.current.get(name__startswith='subdir1')
-        subdir1_v2 = subdir1_v1.clone()
-        subdir1_v2.parent = None
-        subdir1_v2.name = 'subdir1.v2'
-        subdir1_v2.save()
-
-        t2 = get_utc_now()
-        sleep(0.1)
-
-        current_parentdir = Directory.objects.current.get(name__startswith='parent')
-        subdir1_v3 = subdir1_v2.clone()
-        subdir1_v3.parent = current_parentdir
-        subdir1_v3.name = 'subdir1.v3'
-        subdir1_v3.save()
-
-        t3 = get_utc_now()
-
-        # there should be 2 directories in the parent directory at time t1
-        parentdir_at_t1 = Directory.objects.as_of(t1).get(name__startswith='parent')
-        self.assertEqual(2, parentdir_at_t1.directory_set.all().count())
-
-        # there should be 1 directory in the parent directory at time t2
-        parentdir_at_t2 = Directory.objects.as_of(t2).get(name__startswith='parent')
-        self.assertEqual(1, parentdir_at_t2.directory_set.all().count())
-
-        # there should be 2 directories in the parent directory at time t3
-        parentdir_at_t3 = Directory.objects.as_of(t3).get(name__startswith='parent')
-        self.assertEqual(2, parentdir_at_t3.directory_set.all().count())
-
-
 class ManyToManyFilteringTest(TestCase):
     def setUp(self):
         c1 = C1(name='c1.v1')
@@ -1122,6 +1162,11 @@ class ManyToManyFilteringTest(TestCase):
         c2.save()
         c3.save()
 
+        # Play on an object's instance
+        c2 = c2.clone()
+        c2.name = 'c2.v2'
+        c2.save()
+
         self.t0 = get_utc_now()
         sleep(0.1)
 
@@ -1129,6 +1174,9 @@ class ManyToManyFilteringTest(TestCase):
         c1.c2s.add(c2)
 
         self.t1 = get_utc_now()
+        # at t1:
+        #   c1.c2s = [c2]
+        #   c2.c3s = [c3]
         sleep(0.1)
 
         c3a = C3(name='c3a.v1')
@@ -1137,6 +1185,21 @@ class ManyToManyFilteringTest(TestCase):
 
         sleep(0.1)
         self.t2 = get_utc_now()
+        # at t2:
+        #   c1.c2s = [c2]
+        #   c2.c3s = [c3, c3a]
+
+        c1 = c1.clone()
+        c1.name = 'c1.v2'
+        c1.save()
+
+        c3a.delete()
+
+        sleep(0.1)
+        self.t3 = get_utc_now()
+        # at t3:
+        #   c1.c2s = [c2]
+        #   c2.c3s = [c3]
 
     def test_filtering_one_jump(self):
         """
@@ -1160,6 +1223,66 @@ class ManyToManyFilteringTest(TestCase):
         should_be_c1 = C1.objects.as_of(self.t1) \
             .filter(c2s__name__startswith='c2').first()
         self.assertIsNotNone(should_be_c1)
+
+    def test_filtering_one_jump_with_version_at_t3(self):
+        """
+        Test filtering m2m reations with 2 models with propagaton of querytime
+        information across all tables.
+        Also test after an object being in a relationship has been deleted.
+        """
+        should_be_c2 = C2.objects.as_of(self.t3) \
+            .filter(c3s__name__startswith='c3.').first()
+        self.assertIsNotNone(should_be_c2)
+        self.assertEqual(should_be_c2.name, 'c2.v2')
+
+        should_be_none = C2.objects.as_of(self.t3) \
+            .filter(c3s__name__startswith='c3a').first()
+        self.assertIsNone(should_be_none)
+
+    @skipUnless(connection.vendor == 'sqlite', 'SQL is database specific, only sqlite is tested here.')
+    def test_query_created_by_filtering_one_jump_with_version_at_t1(self):
+        """
+        Test filtering m2m relations with 2 models with propagation of querytime
+        information across all tables
+        """
+        should_be_c1_queryset = C1.objects.as_of(self.t1) \
+            .filter(c2s__name__startswith='c2')
+        should_be_c1_query = str(should_be_c1_queryset.query)
+        t1_string = self.t1.isoformat().replace('T', ' ')
+        t1_no_tz_string = t1_string[:-6]
+        expected_query = """
+        SELECT "versions_tests_c1"."id", "versions_tests_c1"."identity",
+               "versions_tests_c1"."version_start_date",
+               "versions_tests_c1"."version_end_date",
+               "versions_tests_c1"."version_birth_date", "versions_tests_c1"."name"
+          FROM "versions_tests_c1"
+    INNER JOIN "versions_tests_c1_c2s" ON (
+                  "versions_tests_c1"."id" = "versions_tests_c1_c2s"."c1_id"
+                   AND ((
+                      versions_tests_c1_c2s.version_start_date <= {time}
+                      AND (versions_tests_c1_c2s.version_end_date > {time}
+                        OR versions_tests_c1_c2s.version_end_date is NULL
+                      )
+                   ))
+               )
+    INNER JOIN "versions_tests_c2" ON (
+                  "versions_tests_c1_c2s"."C2_id" = "versions_tests_c2"."id"
+                   AND ((
+                      versions_tests_c2.version_start_date <= {time}
+                      AND (versions_tests_c2.version_end_date > {time}
+                        OR versions_tests_c2.version_end_date is NULL
+                      )
+                   ))
+               )
+         WHERE (
+               ("versions_tests_c1"."version_end_date" > {time_no_tz}
+                   OR "versions_tests_c1"."version_end_date" IS NULL)
+           AND "versions_tests_c1"."version_start_date" <= {time_no_tz}
+           AND "versions_tests_c2"."name" LIKE c2% escape '\\'
+               )
+        """.format(time=t1_string, time_no_tz=t1_no_tz_string)
+
+        self.assertStringEqualIgnoreWhiteSpaces(expected_query, should_be_c1_query)
 
     def test_filtering_one_jump_reverse(self):
         """
@@ -1193,7 +1316,11 @@ class ManyToManyFilteringTest(TestCase):
         Test filtering m2m relations with 3 models with propagation of querytime
         information across all tables
         """
-        with self.assertNumQueries(2) as counter:
+        with self.assertNumQueries(3) as counter:
+            should_be_none = C1.objects.as_of(self.t1) \
+                .filter(c2s__c3s__name__startswith='c3a').first()
+            self.assertIsNone(should_be_none)
+
             should_be_c1 = C1.objects.as_of(self.t1) \
                 .filter(c2s__c3s__name__startswith='c3').first()
             self.assertIsNotNone(should_be_c1)
@@ -1202,6 +1329,58 @@ class ManyToManyFilteringTest(TestCase):
             count = C1.objects.as_of(self.t1) \
                 .filter(c2s__c3s__name__startswith='c3').all().count()
             self.assertEqual(1, count)
+
+    @skipUnless(connection.vendor == 'sqlite', 'SQL is database specific, only sqlite is tested here.')
+    def test_query_created_by_filtering_two_jumps_with_version_at_t1(self):
+        """
+        Investigate correctness of the resulting SQL query
+        """
+        should_be_c1_queryset = C1.objects.as_of(self.t1) \
+            .filter(c2s__c3s__name__startswith='c3')
+        should_be_c1_query = str(should_be_c1_queryset.query)
+        t1_string = self.t1.isoformat().replace('T', ' ')
+        t1_no_tz_string = t1_string[:-6]
+        expected_query = """
+        SELECT "versions_tests_c1"."id", "versions_tests_c1"."identity",
+               "versions_tests_c1"."version_start_date", "versions_tests_c1"."version_end_date",
+               "versions_tests_c1"."version_birth_date", "versions_tests_c1"."name"
+          FROM "versions_tests_c1"
+    INNER JOIN "versions_tests_c1_c2s" ON (
+                   "versions_tests_c1"."id" = "versions_tests_c1_c2s"."c1_id"
+              AND ((versions_tests_c1_c2s.version_start_date <= {time}
+                     AND (versions_tests_c1_c2s.version_end_date > {time}
+                        OR versions_tests_c1_c2s.version_end_date is NULL ))
+                  )
+               )
+    INNER JOIN "versions_tests_c2" ON (
+                   "versions_tests_c1_c2s"."C2_id" = "versions_tests_c2"."id"
+              AND ((versions_tests_c2.version_start_date <= {time}
+                     AND (versions_tests_c2.version_end_date > {time}
+                        OR versions_tests_c2.version_end_date is NULL ))
+                  )
+              )
+    INNER JOIN "versions_tests_c2_c3s" ON (
+                   "versions_tests_c2"."id" = "versions_tests_c2_c3s"."c2_id"
+               AND ((versions_tests_c2_c3s.version_start_date <= {time}
+                     AND (versions_tests_c2_c3s.version_end_date > {time}
+                        OR versions_tests_c2_c3s.version_end_date is NULL ))
+                  )
+              )
+    INNER JOIN "versions_tests_c3" ON (
+                   "versions_tests_c2_c3s"."C3_id" = "versions_tests_c3"."id"
+               AND ((versions_tests_c3.version_start_date <= {time}
+                     AND (versions_tests_c3.version_end_date > {time}
+                      OR versions_tests_c3.version_end_date is NULL ))
+                   )
+                )
+         WHERE (
+               ("versions_tests_c1"."version_end_date" > {time_no_tz}
+                 OR "versions_tests_c1"."version_end_date" IS NULL)
+           AND "versions_tests_c1"."version_start_date" <= {time_no_tz}
+           AND "versions_tests_c3"."name" LIKE c3%  escape '\\'
+               )
+        """.format(time=t1_string, time_no_tz=t1_no_tz_string)
+        self.assertStringEqualIgnoreWhiteSpaces(expected_query, should_be_c1_query)
 
     def test_filtering_two_jumps_with_version_at_t2(self):
         """
@@ -1216,6 +1395,25 @@ class ManyToManyFilteringTest(TestCase):
             count = C1.objects.as_of(self.t2) \
                 .filter(c2s__c3s__name__startswith='c3').all().count()
             self.assertEqual(2, count)
+
+    def test_filtering_two_jumps_with_version_at_t3(self):
+        """
+        Test filtering m2m relations with 3 models with propagation of querytime
+        information across all tables but this time at point in time t3
+        """
+        with self.assertNumQueries(3) as counter:
+            # Should be None, since object 'c3a' does not exist anymore at t3
+            should_be_none = C1.objects.as_of(self.t3) \
+                .filter(c2s__c3s__name__startswith='c3a').first()
+            self.assertIsNone(should_be_none)
+
+            should_be_c1 = C1.objects.as_of(self.t3) \
+                .filter(c2s__c3s__name__startswith='c3.').first()
+            self.assertIsNotNone(should_be_c1)
+
+            count = C1.objects.as_of(self.t3) \
+                .filter(c2s__c3s__name__startswith='c3.').all().count()
+            self.assertEqual(1, count)
 
     def test_filtering_two_jumps_reverse(self):
         """
@@ -1256,3 +1454,37 @@ class ManyToManyFilteringTest(TestCase):
             count = C3.objects.as_of(self.t2) \
                 .filter(c2s__c1s__name__startswith='c1').all().count()
             self.assertEqual(2, count)
+
+
+class HistoricM2MOperationsTests(TestCase):
+    def setUp(self):
+        # Set up a situation on 23.4.1984
+        ts = datetime.datetime(1984, 4, 23, tzinfo=utc)
+        big_brother = Observer.objects._create_at(ts, name='BigBrother')
+        self.big_brother = big_brother
+        subject = Subject.objects._create_at(ts, name='Winston Smith')
+        big_brother.subjects.add_at(ts, subject)
+
+        # Remove the relationship on 23.5.1984
+        ts_a_month_later = ts + datetime.timedelta(days=30)
+        big_brother.subjects.remove_at(ts_a_month_later, subject)
+
+    def test_observer_subject_relationship_is_active_in_early_1984(self):
+        ts = datetime.datetime(1984, 5, 1, tzinfo=utc)
+        observer = Observer.objects.as_of(ts).get()
+        self.assertEqual(observer.name, 'BigBrother')
+        subjects = observer.subjects.all()
+        self.assertEqual(len(subjects), 1)
+        self.assertEqual(subjects[0].name, 'Winston Smith')
+
+    def test_observer_subject_relationship_is_inactive_in_late_1984(self):
+        ts = datetime.datetime(1984, 8, 16, tzinfo=utc)
+        observer = Observer.objects.as_of(ts).get()
+        self.assertEqual(observer.name, 'BigBrother')
+        subjects = observer.subjects.all()
+        self.assertEqual(len(subjects), 0)
+        subject = Subject.objects.as_of(ts).get()
+        self.assertEqual(subject.name, 'Winston Smith')
+
+    def test_simple(self):
+        self.big_brother.subjects.all().first()
