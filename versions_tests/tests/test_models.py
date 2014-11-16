@@ -16,12 +16,13 @@ import datetime
 from time import sleep
 import itertools
 from django.core.exceptions import SuspiciousOperation, ObjectDoesNotExist, MultipleObjectsReturned, ValidationError
+from django.db import connection
 from django.db.models import Q, Count, Sum
 from django.db.models.fields import CharField
 from django.test import TestCase, TransactionTestCase
 from django.utils.timezone import utc
 from django.utils import six
-from unittest import skip
+from unittest import skip, skipUnless
 import re
 
 from versions.models import Versionable, get_utc_now
@@ -766,6 +767,7 @@ class OneToManyFilteringTest(TestCase):
         team_none = Team.objects.as_of(self.t5).filter(player__name__startswith='p1').first()
         self.assertIsNone(team_none)
 
+    @skipUnless(connection.vendor == 'sqlite', 'SQL is database specific, only sqlite is tested here.')
     def test_query_created_by_filtering_for_deleted_player_at_t5(self):
         team_none_queryset = Team.objects.as_of(self.t5).filter(player__name__startswith='p1')
         team_none_query = str(team_none_queryset.query)
@@ -1237,7 +1239,7 @@ class ManyToManyFilteringTest(TestCase):
             .filter(c3s__name__startswith='c3a').first()
         self.assertIsNone(should_be_none)
 
-    @skip("Expected SQL query still needs to be defined")
+    @skipUnless(connection.vendor == 'sqlite', 'SQL is database specific, only sqlite is tested here.')
     def test_query_created_by_filtering_one_jump_with_version_at_t1(self):
         """
         Test filtering m2m relations with 2 models with propagation of querytime
@@ -1246,9 +1248,40 @@ class ManyToManyFilteringTest(TestCase):
         should_be_c1_queryset = C1.objects.as_of(self.t1) \
             .filter(c2s__name__startswith='c2')
         should_be_c1_query = str(should_be_c1_queryset.query)
+        t1_string = self.t1.isoformat().replace('T', ' ')
+        t1_no_tz_string = t1_string[:-6]
         expected_query = """
-        """
-        print should_be_c1_query
+        SELECT "versions_tests_c1"."id", "versions_tests_c1"."identity",
+               "versions_tests_c1"."version_start_date",
+               "versions_tests_c1"."version_end_date",
+               "versions_tests_c1"."version_birth_date", "versions_tests_c1"."name"
+          FROM "versions_tests_c1"
+    INNER JOIN "versions_tests_c1_c2s" ON (
+                  "versions_tests_c1"."id" = "versions_tests_c1_c2s"."c1_id"
+                   AND ((
+                      versions_tests_c1_c2s.version_start_date <= {time}
+                      AND (versions_tests_c1_c2s.version_end_date > {time}
+                        OR versions_tests_c1_c2s.version_end_date is NULL
+                      )
+                   ))
+               )
+    INNER JOIN "versions_tests_c2" ON (
+                  "versions_tests_c1_c2s"."C2_id" = "versions_tests_c2"."id"
+                   AND ((
+                      versions_tests_c2.version_start_date <= {time}
+                      AND (versions_tests_c2.version_end_date > {time}
+                        OR versions_tests_c2.version_end_date is NULL
+                      )
+                   ))
+               )
+         WHERE (
+               ("versions_tests_c1"."version_end_date" > {time_no_tz}
+                   OR "versions_tests_c1"."version_end_date" IS NULL)
+           AND "versions_tests_c1"."version_start_date" <= {time_no_tz}
+           AND "versions_tests_c2"."name" LIKE c2% escape '\\'
+               )
+        """.format(time=t1_string, time_no_tz=t1_no_tz_string)
+
         self.assertStringEqualIgnoreWhiteSpaces(expected_query, should_be_c1_query)
 
     def test_filtering_one_jump_reverse(self):
@@ -1297,7 +1330,7 @@ class ManyToManyFilteringTest(TestCase):
                 .filter(c2s__c3s__name__startswith='c3').all().count()
             self.assertEqual(1, count)
 
-    @skip("Expected SQL query still needs to be defined")
+    @skipUnless(connection.vendor == 'sqlite', 'SQL is database specific, only sqlite is tested here.')
     def test_query_created_by_filtering_two_jumps_with_version_at_t1(self):
         """
         Investigate correctness of the resulting SQL query
@@ -1305,9 +1338,48 @@ class ManyToManyFilteringTest(TestCase):
         should_be_c1_queryset = C1.objects.as_of(self.t1) \
             .filter(c2s__c3s__name__startswith='c3')
         should_be_c1_query = str(should_be_c1_queryset.query)
+        t1_string = self.t1.isoformat().replace('T', ' ')
+        t1_no_tz_string = t1_string[:-6]
         expected_query = """
-        """
-        print should_be_c1_query
+        SELECT "versions_tests_c1"."id", "versions_tests_c1"."identity",
+               "versions_tests_c1"."version_start_date", "versions_tests_c1"."version_end_date",
+               "versions_tests_c1"."version_birth_date", "versions_tests_c1"."name"
+          FROM "versions_tests_c1"
+    INNER JOIN "versions_tests_c1_c2s" ON (
+                   "versions_tests_c1"."id" = "versions_tests_c1_c2s"."c1_id"
+              AND ((versions_tests_c1_c2s.version_start_date <= {time}
+                     AND (versions_tests_c1_c2s.version_end_date > {time}
+                        OR versions_tests_c1_c2s.version_end_date is NULL ))
+                  )
+               )
+    INNER JOIN "versions_tests_c2" ON (
+                   "versions_tests_c1_c2s"."C2_id" = "versions_tests_c2"."id"
+              AND ((versions_tests_c2.version_start_date <= {time}
+                     AND (versions_tests_c2.version_end_date > {time}
+                        OR versions_tests_c2.version_end_date is NULL ))
+                  )
+              )
+    INNER JOIN "versions_tests_c2_c3s" ON (
+                   "versions_tests_c2"."id" = "versions_tests_c2_c3s"."c2_id"
+               AND ((versions_tests_c2_c3s.version_start_date <= {time}
+                     AND (versions_tests_c2_c3s.version_end_date > {time}
+                        OR versions_tests_c2_c3s.version_end_date is NULL ))
+                  )
+              )
+    INNER JOIN "versions_tests_c3" ON (
+                   "versions_tests_c2_c3s"."C3_id" = "versions_tests_c3"."id"
+               AND ((versions_tests_c3.version_start_date <= {time}
+                     AND (versions_tests_c3.version_end_date > {time}
+                      OR versions_tests_c3.version_end_date is NULL ))
+                   )
+                )
+         WHERE (
+               ("versions_tests_c1"."version_end_date" > {time_no_tz}
+                 OR "versions_tests_c1"."version_end_date" IS NULL)
+           AND "versions_tests_c1"."version_start_date" <= {time_no_tz}
+           AND "versions_tests_c3"."name" LIKE c3%  escape '\\'
+               )
+        """.format(time=t1_string, time_no_tz=t1_no_tz_string)
         self.assertStringEqualIgnoreWhiteSpaces(expected_query, should_be_c1_query)
 
     def test_filtering_two_jumps_with_version_at_t2(self):
