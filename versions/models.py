@@ -390,7 +390,6 @@ class VersionedForeignKey(ForeignKey):
         if not as_of.apply_as_of_time:
             return None
 
-        restriction = where_class()
         restrict_alias = as_of.alias
         if as_of.as_of_time:
             sql = '''{alias}.version_start_date <= %s
@@ -399,8 +398,7 @@ class VersionedForeignKey(ForeignKey):
         else:
             sql = '''{alias}.version_end_date is NULL'''.format(alias=restrict_alias)
             params = None
-        restriction.add(ExtraWhere([sql], params), 'AND')
-        return restriction
+        return ExtraWhere([sql], params)
 
 class VersionedManyToManyField(ManyToManyField):
     def __init__(self, *args, **kwargs):
