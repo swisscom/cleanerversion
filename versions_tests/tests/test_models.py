@@ -1488,3 +1488,20 @@ class HistoricM2MOperationsTests(TestCase):
 
     def test_simple(self):
         self.big_brother.subjects.all().first()
+
+
+class PrefetchingTests(TestCase):
+    def setUp(self):
+        self.team1 = Team.objects.create(name='t1.v1')
+        self.p1 = Player.objects.create(name='p1.v1', team=self.team1)
+        self.p2 = Player.objects.create(name='p2.v1', team=self.team1)
+        sleep(0.1)
+        self.t1 = get_utc_now()
+
+    def test_select_related(self):
+        print "starting test_select_related"
+        print str(Player.objects.as_of(self.t1).select_related('team').all().query)
+        with self.assertNumQueries(2):
+            player = Player.objects.as_of(self.t1).select_related('team').get(name='p1.v1')
+            self.assertIsNotNone(player)
+            self.assertEqual(player.team, self.team1)
