@@ -152,14 +152,25 @@ class VersionManager(models.Manager):
 
 class VersionedWhereNode(WhereNode):
     def as_sql(self, qn, connection):
+        """
+        :param qn: In Django 1.7 this is a compiler; in 1.6, it's an instance-method
+        :param connection: A DB connection
+        :return: A tuple consisting of (sql_string, result_params)
+        """
         # self.children is an array of VersionedExtraWhere-objects
         for child in self.children:
             if isinstance(child, VersionedExtraWhere) and not child.params:
-                query_time = qn.query.as_of_time
-                apply_query_time = qn.query.apply_as_of_time
+                try:
+                    # Django 1.7 handles compilers as objects
+                    _query = qn.query
+                except AttributeError:
+                    # Django 1.6 handles compilers as functions with attributes
+                    _query = qn.im_self.query
+                query_time = _query.as_of_time
+                apply_query_time = _query.apply_as_of_time
                 # Use the join_map to know, what *table* gets joined to which
                 # *left-hand sided* table
-                for lhs, table, join_cols in qn.query.join_map:
+                for lhs, table, join_cols in _query.join_map:
                     if (lhs == child.alias and table == child.related_alias) \
                             or (lhs == child.related_alias and table == child.alias):
                         child.set_joined_alias(table)
