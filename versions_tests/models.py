@@ -20,6 +20,11 @@ class B(Versionable):
 class Team(Versionable):
     name = CharField(max_length=200)
 
+    def __str__(self):
+        return "<" + str(self.__class__.__name__) + " object: " + str(
+            self.name) + " {valid: [" + self.version_start_date.isoformat() + " | " + (
+                   self.version_end_date.isoformat() if self.version_end_date else "None") + "], created: " + self.version_birth_date.isoformat() + "}>"
+
 
 class Player(Versionable):
     name = CharField(max_length=200)

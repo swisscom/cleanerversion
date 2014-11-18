@@ -18,8 +18,7 @@ import itertools
 from django.core.exceptions import SuspiciousOperation, ObjectDoesNotExist, MultipleObjectsReturned, ValidationError
 from django.db import connection
 from django.db.models import Q, Count, Sum
-from django.db.models.fields import CharField
-from django.test import TestCase, TransactionTestCase
+from django.test import TestCase
 from django.utils.timezone import utc
 from django.utils import six
 from unittest import skip, skipUnless
@@ -37,6 +36,7 @@ def get_relation_table(model_class, fieldname):
     else:
         field = field_object.field
     return field.m2m_db_table()
+
 
 def set_up_one_object_with_3_versions():
     b = B.objects.create(name='v1')
@@ -60,13 +60,16 @@ def set_up_one_object_with_3_versions():
 
     return b, t1, t2, t3
 
+
 def remove_white_spaces(self, s):
     return re.sub(r'\s+', '', s)
+
 
 def assertStringEqualIgnoreWhiteSpaces(self, expected, obtained):
     expected = self.remove_white_spaces(expected).lower()
     obtained = self.remove_white_spaces(obtained).lower()
     self.assertEqual(expected, obtained)
+
 
 TestCase.remove_white_spaces = remove_white_spaces
 TestCase.assertStringEqualIgnoreWhiteSpaces = assertStringEqualIgnoreWhiteSpaces
@@ -758,8 +761,9 @@ class OneToManyFilteringTest(TestCase):
         explicit test coverage
         """
         t1_players = list(
-            Player.objects.as_of(self.t1).filter(Q(name__startswith='p1') | Q(name__startswith='p2')).values_list('name',
-                                                                                                             flat=True))
+            Player.objects.as_of(self.t1).filter(Q(name__startswith='p1') | Q(name__startswith='p2')).values_list(
+                'name',
+                flat=True))
         self.assertEqual(2, len(t1_players))
         self.assertListEqual(sorted(t1_players), sorted(['p1.v1', 'p2.v1']))
 
@@ -1058,16 +1062,19 @@ class MultiM2MTest(TestCase):
 
         # Annotations and aggreagations should work with .current objects as well as historical .as_of() objects.
         self.assertEqual(4,
-            Professor.objects.current.annotate(num_students=Count('students')).aggregate(sum=Sum('num_students'))['sum']
+                         Professor.objects.current.annotate(num_students=Count('students')).aggregate(
+                             sum=Sum('num_students'))['sum']
         )
-        self.assertTupleEqual((1,1),
-            (Professor.objects.current.annotate(num_students=Count('students')).get(name='Mr. Biggs').num_students,
-             Professor.objects.current.get(name='Mr. Biggs').students.count())
+        self.assertTupleEqual((1, 1),
+                              (Professor.objects.current.annotate(num_students=Count('students')).get(
+                                  name='Mr. Biggs').num_students,
+                               Professor.objects.current.get(name='Mr. Biggs').students.count())
         )
 
-        self.assertTupleEqual((2,2),
-            (Professor.objects.as_of(self.t1).annotate(num_students=Count('students')).get(name='Mr. Biggs').num_students,
-             Professor.objects.as_of(self.t1).get(name='Mr. Biggs').students.count())
+        self.assertTupleEqual((2, 2),
+                              (Professor.objects.as_of(self.t1).annotate(num_students=Count('students')).get(
+                                  name='Mr. Biggs').num_students,
+                               Professor.objects.as_of(self.t1).get(name='Mr. Biggs').students.count())
         )
 
         # Results should include records for which the annotation returns a 0 count, too.
@@ -1175,7 +1182,7 @@ class ManyToManyFilteringTest(TestCase):
 
         self.t1 = get_utc_now()
         # at t1:
-        #   c1.c2s = [c2]
+        # c1.c2s = [c2]
         #   c2.c3s = [c3]
         sleep(0.1)
 
@@ -1492,16 +1499,50 @@ class HistoricM2MOperationsTests(TestCase):
 
 class PrefetchingTests(TestCase):
     def setUp(self):
-        self.team1 = Team.objects.create(name='t1.v1')
-        self.p1 = Player.objects.create(name='p1.v1', team=self.team1)
-        self.p2 = Player.objects.create(name='p2.v1', team=self.team1)
+        self.team1 = Team.objects.create(name='te1.v1')
+        self.p1 = Player.objects.create(name='pl1.v1', team=self.team1)
+        self.p2 = Player.objects.create(name='pl2.v1', team=self.team1)
         sleep(0.1)
         self.t1 = get_utc_now()
 
     def test_select_related(self):
+        print("Time t1: " + str(self.t1))
+        print(str(Player.objects.all()))
+        print(str(Team.objects.all()))
         print "starting test_select_related"
-        print str(Player.objects.as_of(self.t1).select_related('team').all().query)
+        select_related_query = str(Player.objects.as_of(self.t1).select_related('team').all().query)
+        team_table = Team._meta.db_table
+        player_table = Player._meta.db_table
+        t1_utc_w_tz = str(self.t1)
+        t1_utc_wo_tz = t1_utc_w_tz[:-6]
+        expected_query = """
+            SELECT "{player_table}"."id",
+                   "{player_table}"."identity",
+                   "{player_table}"."version_start_date",
+                   "{player_table}"."version_end_date",
+                   "{player_table}"."version_birth_date",
+                   "{player_table}"."name",
+                   "{player_table}"."team_id",
+                   "{team_table}"."id",
+                   "{team_table}"."identity",
+                   "{team_table}"."version_start_date",
+                   "{team_table}"."version_end_date",
+                   "{team_table}"."version_birth_date",
+                   "{team_table}"."name"
+            FROM "{player_table}"
+            LEFT OUTER JOIN "{team_table}" ON ("{player_table}"."team_id" = "{team_table}"."id"
+                                                      AND (({team_table}.version_start_date <= {ts}
+                                                            AND ({team_table}.version_end_date > {ts}
+                                                                 OR {team_table}.version_end_date IS NULL))))
+            WHERE
+            (
+              ("{player_table}"."version_end_date" > {ts_wo_tz}
+                    OR "{player_table}"."version_end_date" IS NULL)
+              AND "{player_table}"."version_start_date" <= {ts_wo_tz}
+            )
+        """.format(player_table=player_table, team_table=team_table, ts=t1_utc_w_tz, ts_wo_tz=t1_utc_wo_tz)
+        self.assertStringEqualIgnoreWhiteSpaces(expected_query, select_related_query)
         with self.assertNumQueries(2):
-            player = Player.objects.as_of(self.t1).select_related('team').get(name='p1.v1')
+            player = Player.objects.as_of(self.t1).select_related('team').get(name='pl1.v1')
             self.assertIsNotNone(player)
             self.assertEqual(player.team, self.team1)
