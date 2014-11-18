@@ -1183,7 +1183,7 @@ class ManyToManyFilteringTest(TestCase):
         self.t1 = get_utc_now()
         # at t1:
         # c1.c2s = [c2]
-        #   c2.c3s = [c3]
+        # c2.c3s = [c3]
         sleep(0.1)
 
         c3a = C3(name='c3a.v1')
@@ -1506,11 +1506,8 @@ class PrefetchingTests(TestCase):
         self.t1 = get_utc_now()
 
     def test_select_related(self):
-        print("Time t1: " + str(self.t1))
-        print(str(Player.objects.all()))
-        print(str(Team.objects.all()))
-        print "starting test_select_related"
         select_related_query = str(Player.objects.as_of(self.t1).select_related('team').all().query)
+
         team_table = Team._meta.db_table
         player_table = Player._meta.db_table
         t1_utc_w_tz = str(self.t1)
