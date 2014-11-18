@@ -164,8 +164,12 @@ class VersionedWhereNode(WhereNode):
                     # Django 1.7 handles compilers as objects
                     _query = qn.query
                 except AttributeError:
-                    # Django 1.6 handles compilers as functions with attributes
-                    _query = qn.im_self.query
+                    try:
+                        # Django 1.6 (on Python 2.7) handles compilers as functions
+                        _query = qn.im_self.query
+                    except AttributeError:
+                        # Django 1.6 (on Python 3.4) handles compilers as methods
+                        _query = qn.__self__.query
                 query_time = _query.as_of_time
                 apply_query_time = _query.apply_as_of_time
                 # Use the join_map to know, what *table* gets joined to which
