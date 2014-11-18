@@ -1505,7 +1505,14 @@ class PrefetchingTests(TestCase):
         sleep(0.1)
         self.t1 = get_utc_now()
 
-    def test_select_related(self):
+    def test_select_related_query_sqlite(self):
+        with self.assertNumQueries(2):
+            player = Player.objects.as_of(self.t1).select_related('team').get(name='pl1.v1')
+            self.assertIsNotNone(player)
+            self.assertEqual(player.team, self.team1)
+
+    @skipUnless(connection.vendor == 'sqlite', 'SQL is database specific, only sqlite is tested here.')
+    def test_select_related_query_sqlite(self):
         select_related_query = str(Player.objects.as_of(self.t1).select_related('team').all().query)
 
         team_table = Team._meta.db_table
@@ -1539,7 +1546,39 @@ class PrefetchingTests(TestCase):
             )
         """.format(player_table=player_table, team_table=team_table, ts=t1_utc_w_tz, ts_wo_tz=t1_utc_wo_tz)
         self.assertStringEqualIgnoreWhiteSpaces(expected_query, select_related_query)
-        with self.assertNumQueries(2):
-            player = Player.objects.as_of(self.t1).select_related('team').get(name='pl1.v1')
-            self.assertIsNotNone(player)
-            self.assertEqual(player.team, self.team1)
+
+    @skipUnless(connection.vendor == 'postgresql', 'SQL is database specific, only PostgreSQL is tested here.')
+    def test_select_related_query_postgresql(self):
+        select_related_query = str(Player.objects.as_of(self.t1).select_related('team').all().query)
+
+        team_table = Team._meta.db_table
+        player_table = Player._meta.db_table
+        t1_utc_w_tz = str(self.t1)
+        t1_utc_wo_tz = t1_utc_w_tz[:-6]
+        expected_query = """
+            SELECT "{player_table}"."id",
+                   "{player_table}"."identity",
+                   "{player_table}"."version_start_date",
+                   "{player_table}"."version_end_date",
+                   "{player_table}"."version_birth_date",
+                   "{player_table}"."name",
+                   "{player_table}"."team_id",
+                   "{team_table}"."id",
+                   "{team_table}"."identity",
+                   "{team_table}"."version_start_date",
+                   "{team_table}"."version_end_date",
+                   "{team_table}"."version_birth_date",
+                   "{team_table}"."name"
+            FROM "{player_table}"
+            LEFT OUTER JOIN "{team_table}" ON ("{player_table}"."team_id" = "{team_table}"."id"
+                                                      AND (({team_table}.version_start_date <= {ts}
+                                                            AND ({team_table}.version_end_date > {ts}
+                                                                 OR {team_table}.version_end_date IS NULL))))
+            WHERE
+            (
+              ("{player_table}"."version_end_date" > {ts}
+                    OR "{player_table}"."version_end_date" IS NULL)
+              AND "{player_table}"."version_start_date" <= {ts}
+            )
+        """.format(player_table=player_table, team_table=team_table, ts=t1_utc_w_tz, ts_wo_tz=t1_utc_wo_tz)
+        self.assertStringEqualIgnoreWhiteSpaces(expected_query, select_related_query)
