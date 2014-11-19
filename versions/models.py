@@ -25,12 +25,13 @@ from django.db.models.base import Model
 from django.db.models import Q
 from django.db.models.fields import FieldDoesNotExist
 from django.db.models.fields.related import (ForeignKey, ReverseSingleRelatedObjectDescriptor,
-    ReverseManyRelatedObjectsDescriptor, ManyToManyField, ManyRelatedObjectsDescriptor, create_many_related_manager,
-    ForeignRelatedObjectsDescriptor, ManyToOneRel)
+                                             ReverseManyRelatedObjectsDescriptor, ManyToManyField,
+                                             ManyRelatedObjectsDescriptor, create_many_related_manager,
+                                             ForeignRelatedObjectsDescriptor)
 from django.db.models.query import QuerySet, ValuesListQuerySet, ValuesQuerySet
 from django.db.models.signals import post_init
 from django.db.models.sql import Query
-from django.db.models.sql.where import ExtraWhere
+from django.db.models.sql.where import ExtraWhere, WhereNode
 from django.utils.functional import cached_property
 from django.utils.timezone import utc
 from django.utils import six
@@ -40,9 +41,6 @@ from django.db import models, router
 
 def get_utc_now():
     return datetime.datetime.utcnow().replace(tzinfo=utc)
-
-
-AsOfInfo = namedtuple('AsOfInfo', 'as_of_time apply_as_of_time alias')
 
 
 class VersionManager(models.Manager):
@@ -148,6 +146,105 @@ class VersionManager(models.Manager):
         kwargs['version_birth_date'] = timestamp
         return super(VersionManager, self).create(**kwargs)
 
+
+class VersionedWhereNode(WhereNode):
+    def as_sql(self, qn, connection):
+        """
+        :param qn: In Django 1.7 this is a compiler; in 1.6, it's an instance-method
+        :param connection: A DB connection
+        :return: A tuple consisting of (sql_string, result_params)
+        """
+        # self.children is an array of VersionedExtraWhere-objects
+        for child in self.children:
+            if isinstance(child, VersionedExtraWhere) and not child.params:
+                try:
+                    # Django 1.7 handles compilers as objects
+                    _query = qn.query
+                except AttributeError:
+                    # Django 1.6 handles compilers as instancemethods
+                    _query = qn.__self__.query
+                query_time = _query.as_of_time
+                apply_query_time = _query.apply_as_of_time
+                # Use the join_map to know, what *table* gets joined to which
+                # *left-hand sided* table
+                for lhs, table, join_cols in _query.join_map:
+                    if (lhs == child.alias and table == child.related_alias) \
+                            or (lhs == child.related_alias and table == child.alias):
+                        child.set_joined_alias(table)
+                        break
+                if apply_query_time:
+                    # Add query parameters that have not been added till now
+                    child.set_as_of(query_time)
+                else:
+                    # Remove the restriction if it's not required
+                    child.sqls = []
+        return super(VersionedWhereNode, self).as_sql(qn, connection)
+
+
+class VersionedExtraWhere(ExtraWhere):
+    """
+    A specific implementation of ExtraWhere;
+    Before as_sql can be called on an object, ensure that calls to
+    - set_as_of and
+    - set_joined_alias
+    have been done
+    """
+
+    def __init__(self, historic_sql, current_sql, alias, remote_alias):
+        super(VersionedExtraWhere, self).__init__(sqls=[], params=[])
+        self.historic_sql = historic_sql
+        self.current_sql = current_sql
+        self.alias = alias
+        self.related_alias = remote_alias
+        self._as_of_time_set = False
+        self.as_of_time = None
+
+    def set_as_of(self, as_of_time):
+        self.as_of_time = as_of_time
+        self._as_of_time_set = True
+
+    def set_joined_alias(self, joined_alias):
+        """
+        Takes the alias that is being joined to the query and applies the query
+        time constraint to its table
+
+        :param str joined_alias: The table name of the alias
+        """
+        self._joined_alias = joined_alias
+
+    def as_sql(self, qn=None, connection=None):
+        sql = ""
+        params = []
+
+        # Set the SQL string in dependency of whether as_of_time was set or not
+        if self._as_of_time_set:
+            if self.as_of_time:
+                sql = self.historic_sql
+                params = [self.as_of_time] * 2
+                # 2 is the number of occurences of the timestamp in an as_of-filter expression
+            else:
+                # If as_of_time was set to None, we're dealing with a query for "current" values
+                sql = self.current_sql
+        else:
+            # No as_of_time has been set; Perhaps, as_of was not part of the query -> That's OK
+            pass
+
+        # By here, the sql string is defined if an as_of_time was provided
+        if self._joined_alias:
+            sql = sql.format(alias=self._joined_alias)
+        else:
+            raise ValueError("joined_alias not set")
+
+        # Set the final sqls
+        # self.sqls needs to be set before the call to parent
+        if sql:
+            self.sqls = [sql]
+        else:
+            self.sqls = ["1=1"]
+        self.params = params
+        return super(VersionedExtraWhere, self).as_sql(qn, connection)
+
+
 class VersionedQuery(Query):
     """
     VersionedQuery has awareness of the query time restrictions.  When the query is compiled,
@@ -156,19 +253,20 @@ class VersionedQuery(Query):
     """
 
     def __init__(self, *args, **kwargs):
+        kwargs['where'] = VersionedWhereNode
         super(VersionedQuery, self).__init__(*args, **kwargs)
         self.set_as_of(None, False)
 
     def clone(self, *args, **kwargs):
-        obj = super(VersionedQuery, self).clone(*args, **kwargs)
+        _clone = super(VersionedQuery, self).clone(*args, **kwargs)
         try:
-            obj.set_as_of(self.as_of_time, self.apply_as_of_time)
+            _clone.set_as_of(self.as_of_time, self.apply_as_of_time)
         except AttributeError:
             # If the caller is using clone to create a different type of Query, that's OK.
             # An example of this is when creating or updating an object, this method is called
             # with a first parameter of sql.UpdateQuery.
             pass
-        return obj
+        return _clone
 
     def set_as_of(self, as_of_time, apply_as_of_time):
         """
@@ -180,39 +278,6 @@ class VersionedQuery(Query):
         self.as_of_time = as_of_time
         self.apply_as_of_time = apply_as_of_time
 
-    def get_compiler(self, *args, **kwargs):
-        # Wait! One more thing before returning the compiler:
-        # propagate the query time to all the related foreign key fields.
-        self.propagate_query_time()
-        return super(VersionedQuery, self).get_compiler(*args, **kwargs)
-
-    def propagate_query_time(self):
-        """
-        This sets as query time, or lack of query time, on all the foreign keys
-        involved in the query.  Only if they are aware of the query time can they
-        create a time-based restriction in the JOIN ON clause.  In the case of
-        left outer joins, it is necessary that the time-based restriction happens
-        in the JOIN ON clause.  For inner joins, it doesn't hurt.
-        """
-        first = True
-        for alias in self.tables:
-            if not self.alias_refcount[alias]:
-                continue
-            try:
-                name, alias, join_type, lhs, join_cols, _, join_field = self.alias_map[alias]
-            except KeyError:
-                # Extra tables can end up in self.tables, but not in the
-                # alias_map if they aren't in a join. That's OK. We skip them.
-                continue
-            if join_type and not first:
-                try:
-                    # For the case where join_field is a ManyToOneRel or similar:
-                    field = join_field.field
-                except AttributeError:
-                    # For the case where join_field is a ForeignKey:
-                    field = join_field
-                field.set_as_of(AsOfInfo(self.as_of_time, self.apply_as_of_time, alias))
-            first = False
 
 class VersionedQuerySet(QuerySet):
     """
@@ -349,19 +414,9 @@ class VersionedForeignKey(ForeignKey):
     We also want to allow keeping track of any as_of time so that joins can be restricted
     based on that.
     """
+
     def __init__(self, *args, **kwargs):
         super(VersionedForeignKey, self).__init__(*args, **kwargs)
-        self.as_of_info = AsOfInfo(None, False, None)
-
-
-    def set_as_of(self, as_of_info):
-        """
-        Set the as_of time that will be used to restrict the query for the valid objects.
-        :param DateTime as_of_time: Datetime or None (None means use the current objects)
-        :param bool apply_as_of_time: If false, then the query will not be restricted by as_of_time
-        :return:
-        """
-        self.as_of_info = as_of_info
 
     def contribute_to_class(self, cls, name, virtual_only=False):
         super(VersionedForeignKey, self).contribute_to_class(cls, name, virtual_only)
@@ -384,21 +439,15 @@ class VersionedForeignKey(ForeignKey):
         JOIN's conditional filtering part
 
         :return: SQL conditional statement
-        :rtype: str
+        :rtype: WhereNode
         """
-        as_of = self.as_of_info
-        if not as_of.apply_as_of_time:
-            return None
+        historic_sql = '''{alias}.version_start_date <= %s
+                 AND ({alias}.version_end_date > %s OR {alias}.version_end_date is NULL )'''
+        current_sql = '''{alias}.version_end_date is NULL'''
+        # How 'bout creating an ExtraWhere here, without params
+        return where_class([VersionedExtraWhere(historic_sql=historic_sql, current_sql=current_sql, alias=alias,
+                                                remote_alias=remote_alias)])
 
-        restrict_alias = as_of.alias
-        if as_of.as_of_time:
-            sql = '''{alias}.version_start_date <= %s
-                     AND ({alias}.version_end_date > %s OR {alias}.version_end_date is NULL )'''.format(alias=restrict_alias)
-            params = [as_of.as_of_time, as_of.as_of_time]
-        else:
-            sql = '''{alias}.version_end_date is NULL'''.format(alias=restrict_alias)
-            params = None
-        return ExtraWhere([sql], params)
 
 class VersionedManyToManyField(ManyToManyField):
     def __init__(self, *args, **kwargs):
@@ -503,6 +552,10 @@ class VersionedReverseSingleRelatedObjectDescriptor(ReverseSingleRelatedObjectDe
 
         if not isinstance(current_elt, Versionable):
             raise TypeError("It seems like " + str(type(self)) + " is not a Versionable")
+
+        if Versionable.matches_as_of(current_elt, instance.as_of):
+            current_elt.as_of = instance.as_of
+            return current_elt
 
         return current_elt.__class__.objects.as_of(instance.as_of).get(identity=current_elt.identity)
 
@@ -958,6 +1011,20 @@ class Versionable(models.Model):
             # On rel, set the source ID to self.id
             setattr(rel, source.source_field_name, self)
             rel.save()
+
+    @staticmethod
+    def matches_as_of(instance, as_of_time):
+        """
+        Checks whether the given instance satisfies the given as_of_time
+
+        :param instance: an instance of Versionable
+        :param as_of_time: datetime value to check against, or None.
+        """
+        if not as_of_time:
+            return instance.version_end_date is None
+
+        return instance.version_start_date <= as_of_time \
+               and (instance.version_end_date is None or instance.version_end_date > as_of_time)
 
 
 class VersionedManyToManyModel(object):
