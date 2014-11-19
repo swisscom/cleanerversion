@@ -553,6 +553,10 @@ class VersionedReverseSingleRelatedObjectDescriptor(ReverseSingleRelatedObjectDe
         if not isinstance(current_elt, Versionable):
             raise TypeError("It seems like " + str(type(self)) + " is not a Versionable")
 
+        if Versionable.matches_as_of(current_elt, instance.as_of):
+            current_elt.as_of = instance.as_of
+            return current_elt
+
         return current_elt.__class__.objects.as_of(instance.as_of).get(identity=current_elt.identity)
 
 
@@ -1007,6 +1011,20 @@ class Versionable(models.Model):
             # On rel, set the source ID to self.id
             setattr(rel, source.source_field_name, self)
             rel.save()
+
+    @staticmethod
+    def matches_as_of(instance, as_of_time):
+        """
+        Checks whether the given instance satisfies the given as_of_time
+
+        :param instance: an instance of Versionable
+        :param as_of_time: datetime value to check against, or None.
+        """
+        if not as_of_time:
+            return instance.version_end_date is None
+
+        return instance.version_start_date <= as_of_time \
+               and (instance.version_end_date is None or instance.version_end_date > as_of_time)
 
 
 class VersionedManyToManyModel(object):

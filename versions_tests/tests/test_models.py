@@ -1505,11 +1505,26 @@ class PrefetchingTests(TestCase):
         sleep(0.1)
         self.t1 = get_utc_now()
 
-    def test_select_related_query_sqlite(self):
-        with self.assertNumQueries(2):
+    def test_select_related(self):
+        with self.assertNumQueries(1):
             player = Player.objects.as_of(self.t1).select_related('team').get(name='pl1.v1')
             self.assertIsNotNone(player)
             self.assertEqual(player.team, self.team1)
+
+        p1 = self.p1.clone()
+        p1.name = 'pl1.v2'
+        p1.team = None
+        p1.save()
+        t2 = get_utc_now()
+        with self.assertNumQueries(1):
+            player = Player.objects.current.select_related('team').get(name='pl1.v2')
+            self.assertIsNotNone(player)
+            self.assertIsNone(player.team)
+
+        with self.assertNumQueries(1):
+            player = Player.objects.as_of(t2).select_related('team').get(name='pl1.v2')
+            self.assertIsNotNone(player)
+            self.assertIsNone(player.team)
 
     @skipUnless(connection.vendor == 'sqlite', 'SQL is database specific, only sqlite is tested here.')
     def test_select_related_query_sqlite(self):
