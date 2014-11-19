@@ -24,9 +24,18 @@ class B(Versionable):
 
 
 ############################################
-# OneToManyTest models
+# Models for
+# - OneToManyTest
+# - PrefetchingTest
+class City(Versionable):
+    name = CharField(max_length=200)
+
+    __str__ = versionable_description
+
+
 class Team(Versionable):
     name = CharField(max_length=200)
+    city = VersionedForeignKey(City, null=True)
 
     __str__ = versionable_description
 

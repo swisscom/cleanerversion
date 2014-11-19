@@ -26,7 +26,7 @@ import re
 
 from versions.models import Versionable, get_utc_now
 from versions_tests.models import Professor, Classroom, Student, Pupil, Teacher, Observer, B, Subject, Team, Player, \
-    Directory, C1, C2, C3
+    City, Directory, C1, C2, C3
 
 
 def get_relation_table(model_class, fieldname):
@@ -788,7 +788,8 @@ class OneToManyFilteringTest(TestCase):
                 "{team_table}"."version_start_date",
                 "{team_table}"."version_end_date",
                 "{team_table}"."version_birth_date",
-                "{team_table}"."name"
+                "{team_table}"."name",
+                "{team_table}"."city_id"
             FROM "{team_table}"
             INNER JOIN
                 "{player_table}" ON (
@@ -1499,7 +1500,8 @@ class HistoricM2MOperationsTests(TestCase):
 
 class PrefetchingTests(TestCase):
     def setUp(self):
-        self.team1 = Team.objects.create(name='te1.v1')
+        self.city1 = City.objects.create(name='Chicago')
+        self.team1 = Team.objects.create(name='te1.v1', city=self.city1)
         self.p1 = Player.objects.create(name='pl1.v1', team=self.team1)
         self.p2 = Player.objects.create(name='pl2.v1', team=self.team1)
         sleep(0.1)
@@ -1521,10 +1523,11 @@ class PrefetchingTests(TestCase):
             self.assertIsNotNone(player)
             self.assertIsNone(player.team)
 
+        # Multiple foreign-key related tables should still only require one query
         with self.assertNumQueries(1):
-            player = Player.objects.as_of(t2).select_related('team').get(name='pl1.v2')
+            player = Player.objects.as_of(t2).select_related('team__city').get(name='pl2.v1')
             self.assertIsNotNone(player)
-            self.assertIsNone(player.team)
+            self.assertEqual(self.city1, player.team.city)
 
     @skipUnless(connection.vendor == 'sqlite', 'SQL is database specific, only sqlite is tested here.')
     def test_select_related_query_sqlite(self):
@@ -1547,7 +1550,8 @@ class PrefetchingTests(TestCase):
                    "{team_table}"."version_start_date",
                    "{team_table}"."version_end_date",
                    "{team_table}"."version_birth_date",
-                   "{team_table}"."name"
+                   "{team_table}"."name",
+                   "{team_table}"."city_id"
             FROM "{player_table}"
             LEFT OUTER JOIN "{team_table}" ON ("{player_table}"."team_id" = "{team_table}"."id"
                                                       AND (({team_table}.version_start_date <= {ts}
@@ -1583,7 +1587,8 @@ class PrefetchingTests(TestCase):
                    "{team_table}"."version_start_date",
                    "{team_table}"."version_end_date",
                    "{team_table}"."version_birth_date",
-                   "{team_table}"."name"
+                   "{team_table}"."name",
+                   "{team_table}"."city_id"
             FROM "{player_table}"
             LEFT OUTER JOIN "{team_table}" ON ("{player_table}"."team_id" = "{team_table}"."id"
                                                       AND (({team_table}.version_start_date <= {ts}
