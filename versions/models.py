@@ -43,9 +43,6 @@ def get_utc_now():
     return datetime.datetime.utcnow().replace(tzinfo=utc)
 
 
-AsOfInfo = namedtuple('AsOfInfo', 'as_of_time apply_as_of_time alias')
-
-
 class VersionManager(models.Manager):
     """
     This is the Manager-class for any class that inherits from Versionable
@@ -420,7 +417,6 @@ class VersionedForeignKey(ForeignKey):
 
     def __init__(self, *args, **kwargs):
         super(VersionedForeignKey, self).__init__(*args, **kwargs)
-        self.as_of_info = AsOfInfo(None, False, None)
 
     def contribute_to_class(self, cls, name, virtual_only=False):
         super(VersionedForeignKey, self).contribute_to_class(cls, name, virtual_only)
