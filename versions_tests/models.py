@@ -3,6 +3,12 @@ from django.db.models import CharField
 from versions.models import Versionable, VersionedManyToManyField, VersionedForeignKey
 
 
+def versionable_description(obj):
+    return "<" + str(obj.__class__.__name__) + " object: " + str(
+        obj.name) + " {valid: [" + obj.version_start_date.isoformat() + " | " + (
+               obj.version_end_date.isoformat() if obj.version_end_date else "None") + "], created: " + obj.version_birth_date.isoformat() + "}>"
+
+
 ############################################
 # The following model is used for:
 # - CreationTest
@@ -14,26 +20,22 @@ from versions.models import Versionable, VersionedManyToManyField, VersionedFore
 class B(Versionable):
     name = CharField(max_length=200)
 
+    __str__ = versionable_description
+
 
 ############################################
 # OneToManyTest models
 class Team(Versionable):
     name = CharField(max_length=200)
 
-    def __str__(self):
-        return "<" + str(self.__class__.__name__) + " object: " + str(
-            self.name) + " {valid: [" + self.version_start_date.isoformat() + " | " + (
-                   self.version_end_date.isoformat() if self.version_end_date else "None") + "], created: " + self.version_birth_date.isoformat() + "}>"
+    __str__ = versionable_description
 
 
 class Player(Versionable):
     name = CharField(max_length=200)
     team = VersionedForeignKey(Team, null=True)
 
-    def __str__(self):
-        return "<" + str(self.__class__.__name__) + " object: " + str(
-            self.name) + " {valid: [" + self.version_start_date.isoformat() + " | " + (
-                   self.version_end_date.isoformat() if self.version_end_date else "None") + "], created: " + self.version_birth_date.isoformat() + "}>"
+    __str__ = versionable_description
 
 
 ############################################
@@ -50,16 +52,14 @@ class Professor(Versionable):
     address = CharField(max_length=200)
     phone_number = CharField(max_length=200)
 
-    def __str__(self):
-        return self.name
+    __str__ = versionable_description
 
 
 class Classroom(Versionable):
     name = CharField(max_length=200)
     building = CharField(max_length=200)
 
-    def __str__(self):
-        return self.name
+    __str__ = versionable_description
 
 
 class Student(Versionable):
@@ -67,8 +67,7 @@ class Student(Versionable):
     professors = VersionedManyToManyField("Professor", related_name='students')
     classrooms = VersionedManyToManyField("Classroom", related_name='students')
 
-    def __str__(self):
-        return self.name
+    __str__ = versionable_description
 
 
 ############################################
@@ -79,10 +78,14 @@ class Pupil(Versionable):
     language_teachers = VersionedManyToManyField('Teacher', related_name='language_students')
     science_teachers = VersionedManyToManyField('Teacher', related_name='science_students')
 
+    __str__ = versionable_description
+
 
 class Teacher(Versionable):
     name = CharField(max_length=200)
     domain = CharField(max_length=200)
+
+    __str__ = versionable_description
 
 
 ############################################
@@ -91,14 +94,20 @@ class C1(Versionable):
     name = CharField(max_length=50)
     c2s = VersionedManyToManyField("C2", related_name='c1s')
 
+    __str__ = versionable_description
+
 
 class C2(Versionable):
     name = CharField(max_length=50)
     c3s = VersionedManyToManyField("C3", related_name='c2s')
 
+    __str__ = versionable_description
+
 
 class C3(Versionable):
     name = CharField(max_length=50)
+
+    __str__ = versionable_description
 
 
 ############################################
@@ -106,7 +115,11 @@ class C3(Versionable):
 class Observer(Versionable):
     name = CharField(max_length=200)
 
+    __str__ = versionable_description
+
 
 class Subject(Versionable):
     name = CharField(max_length=200)
     observers = VersionedManyToManyField('Observer', related_name='subjects')
+
+    __str__ = versionable_description
