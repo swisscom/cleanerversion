@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-from setuptools import setup
+from setuptools import setup, find_packages
 
 """
 Documentation can be found at https://docs.python.org/2/distutils/index.html, but usually you only need to do the
@@ -21,7 +21,7 @@ If you get errors, check the following things:
 """
 
 setup(name='CleanerVersion',
-      version='1.3.3',
+      version='1.3.4',
       description='A versioning solution for relational data models using the Django ORM',
       long_description='CleanerVersion is a solution that allows you to read and write multiple versions of an entry '
                        'to and from your relational database. It allows to keep track of modifications on an object '
@@ -32,7 +32,7 @@ setup(name='CleanerVersion',
       author='Manuel Jeckelmann, Jean-Christophe Zulian, Brian King, Andrea Marcacci',
       author_email='engineering.sophia@swisscom.com',
       license='Apache License 2.0',
-      packages=['versions', 'versions.util'],
+      packages=find_packages(exclude=['cleanerversion', 'cleanerversion.*']),
       url='https://github.com/swisscom/cleanerversion',
       install_requires=['django'],
       classifiers=[
