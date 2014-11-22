@@ -7,10 +7,17 @@ env:
   - TOX_ENV=py34-django16
   - TOX_ENV=py34-django17
 
+addons:
+  - postgresql: "9.3"
+
 # Dependencies
 install:
   - pip install tox
   - pip install coveralls
+
+before_script:
+  - cp -f cleanerversion/settings/pg_travis.py cleanerversion/settings/pg.py
+  - psql -c 'alter user postgres createdb;' -U postgres
 
 # Run tests
 script:

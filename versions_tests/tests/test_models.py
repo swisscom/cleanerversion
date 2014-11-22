@@ -1023,7 +1023,7 @@ class MultiM2MTest(TestCase):
         first_professor = all_professors[0]
         last_professor = all_professors[-1]
         some_professor_ids = [o.pk for o in all_professors][:2]
-        self.assertNotEquals(first_professor.identity, last_professor.identity)
+        self.assertNotEqual(first_professor.identity, last_professor.identity)
         self.assertTrue(1 < len(some_professor_ids) < len(all_professors))
 
         self.assertEqual(benny.professors.count(), 0)
