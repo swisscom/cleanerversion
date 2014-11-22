@@ -24,6 +24,8 @@ install:
 before_script:
   - cp -f cleanerversion/settings/pg_travis.py cleanerversion/settings/pg.py
   - psql -c 'alter user postgres createdb;' -U postgres
+  - psql -c 'drop database if exists travis_ci_test;' -U postgres
+  - psql -c 'create database travis_ci_test with owner postgres;' -U postgres
 
 # Run tests
 script:
