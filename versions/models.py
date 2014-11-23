@@ -50,6 +50,11 @@ class VersionManager(models.Manager):
     use_for_related_fields = True
 
     def get_queryset(self):
+        """
+        Returns a VersionedQuerySet capable of handling version time restrictions.
+
+        :return: VersionedQuerySet
+        """
         return VersionedQuerySet(self.model, using=self._db)
 
     def as_of(self, time=None):
@@ -62,8 +67,17 @@ class VersionManager(models.Manager):
 
     def next_version(self, object):
         """
-        Return the next version of the given object. In case there is no next object existing, meaning the given
+        Return the next version of the given object.
+
+        In case there is no next object existing, meaning the given
         object is the current version, the function returns this version.
+
+        Note that if object's version_end_date is None, this does not check the database to
+        see if there is a newer version (perhaps created by some other code), it simply
+        returns the passed object.
+
+        :param object: Versionable
+        :return: Versionable
         """
         if object.version_end_date == None:
             return object
@@ -83,8 +97,13 @@ class VersionManager(models.Manager):
 
     def previous_version(self, object):
         """
-        Return the previous version of the given object. In case there is no previous object existing, meaning the
-        given object is the first version of the object, then the function returns this version.
+        Return the previous version of the given object.
+
+        In case there is no previous object existing, meaning the given object
+        is the first version of the object, then the function returns this version.
+
+        :param object: Versionable
+        :return: Versionable
         """
         if object.version_birth_date == object.version_start_date:
             return object
@@ -107,9 +126,18 @@ class VersionManager(models.Manager):
 
     def current_version(self, object):
         """
-        Return the current version of the given object. The current version is the one having its version_end_date set
-        to NULL. If there is not such a version then it means the object has been 'deleted' and so there is no
-        current version available. In this case the function returns None.
+        Return the previous version of the given object.
+
+        The current version is the one having its version_end_date set to NULL.
+        If there is not such a version then it means the object has been 'deleted'
+        and so there is no current version available. In this case the function returns None.
+
+        Note that if object's version_end_date is None, this does not check the database to
+        see if there is a newer version (perhaps created by some other code), it simply
+        returns the passed object.
+
+        :param object: Versionable
+        :return: Versionable
         """
         if object.version_end_date == None:
             return object

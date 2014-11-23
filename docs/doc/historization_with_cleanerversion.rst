@@ -55,7 +55,7 @@ would be a working example, if place in the same source file. Here's how::
         address = CharField(max_length=200)
         phone = CharField(max_length=200)
 
-Assuming you know how to deal with `Django Models <https://docs.djangoproject.com/en/dev/topics/db/models/>`_ (you will need to sync your DB before your
+Assuming you know how to deal with `Django Models <https://docs.djangoproject.com/en/stable/topics/db/models/>`_ (you will need to sync your DB before your
 code gets usable; Or you're only testing, then that step is done by Django), the next step is using your model to create
 some entries::
 
@@ -179,14 +179,6 @@ Let's continue with the queries, to check, whether all that story can be reconst
 Pretty easy, isn't it? ;)
 
 
-HowTo
-=====
-
-The first step is to import :class:`versions.models.Versionable`. :class:`~versions.models.Versionable` subclasses
-:class:`django.db.models.Model` and can thus be accessed in the same way.
-
-#TODO: add further stuff here or remove this chapter!
-
 Slowly Changing Dimensions - Type 2
 ===================================
 
@@ -209,13 +201,13 @@ id
 identity
     Identifies an object over all its versions, i.e. identity does not change from one version to another
 
-version_birth_date (formerly ``created_date``)
+version_birth_date
     The timestamp at which an object was created. All versions of an object will have the same creation date.
 
-version_start_date (formerly ``version_date``)
+version_start_date
     The timestamp at which a version was created.
 
-version_end_date (formerly ``clone_date``)
+version_end_date
     The timestamp at which a version was cloned. If a version has not been cloned yet, ``version_end_date`` will be
     set to ``None`` (or NULL) and the entry is considered the most recent entry of an object (i.e. it is the object's
     current version)
@@ -343,6 +335,24 @@ Now, let's read some stuff previously loaded::
 
     sportsclubs = SportsClub.objects.as_of(t1)  # This returns all SportsClubs existing at time t1 [returned within a QuerySet]
 
+
+You can also use select_related() to reduce the number of database queries made, if you know that you'll need the
+ForeignKey-related objects::
+
+    # Only one database query is made for this set of statements:
+    hcfg = SportsClub.objects.current.select_related('discipline').get(name='HCFG')
+    print hcfg.discipline.name
+
+Note that select_related only works for models containing foreign keys.  It does not work for reverse relationships::
+
+    # This does not save any database queries!  select_related() has no effect here:
+    icehockey = Discipline.objects.current.select_related('sportsclub_set').get(name='Ice Hockey')
+    print icehockey.sportsclub_set.first().name
+
+This is not a CleanerVersion limitation; it's just the way that Django's select_related() works.  Use
+prefetch_related() instead if you want to prefetch reverse or many-to-many relationships.  Note that
+prefetch_related() will use at least two queries to prefetch the related objects.
+
 Many-to-Many relationships
 ==========================
 
@@ -364,44 +374,135 @@ Assume a Person can be part of multiple SportsClubs::
 
 Adding objects to a versioned M2M relationship
 ----------------------------------------------
+Adding objects to a many-to-many relationship works just like in standard Django::
 
-# TODO or remove
+    person1 = Person.objects.create(name="Hanover Fiste", phone="555-1234")
+    person2 = Person.objects.create(name="Gloria", phone="555-6777")
+    club = SportsClub.objects.create(name="Sweatshop", practice_periodicity="daily")
+
+
+    # This is one way to do it:
+    club.members.add(person1, person2)
+
+    # Another way to do it to assign a list.  This will remove any existing
+    # members that are not in the list, and add any members that are in the
+    # list, but not yet associated in the database.
+    club.members = [person1, person2]
+
+Changing many-to-many relationships is only allowed when using the current version of the object::
+
+    # This would raise an Exception:
+    old_club = SportsClub.objects.previous_version(club)
+    old_club.members.add(person3)
+
 
 Reading objects from a versioned M2M relationship
 -------------------------------------------------
+This works just like in standard Django, with the exception that you specify either that you are using
+the current state, or the state at a specific point in time::
 
-# TODO or remove
+    # Working with the current state:
+    club = Club.objects.current.get(name='Sweatshop')
+    local_members = club.members.filter(phone__startswith='555').all()
+
+    # Working with a specific point in time:
+    november1 = datetime.datetime(2014, 11, 1).replace(tzinfo=pytz.utc)
+    club = Club.objects.as_of(november1).get(name='Sweatshop')
+    # The related objects that are retrieved were existing and related as of november1, too.
+    local_members = club.members.filter(phone__startswith='555').all()
+
+    # Queries can of course traverse relationships, too:
+    clubs_with_g_members = Club.objects.current.filter(members__name__startswith='G').all()
 
 Versioning objects being part of a versioned M2M relationship
 -------------------------------------------------------------
-
 Versioning an object in a ManyToMany relationship requires 3 steps to be done, including the initial setup:
 
-#) Setting up the situation requires to add at least two objects to a M2M relationship
+1) Setting up the situation requires to add at least two objects to a M2M relationship::
 
-    .. image:: ../images/clone_m2m_item_1.png
+    blog1.items.add(item1)
+
+  .. image:: ../images/clone_m2m_item_1.png
         :align: center
 
-#) Further on, let's clone the Item-instance
+2) Further on, let's clone the Item-instance::
 
-    .. image:: ../images/clone_m2m_item_2.png
+      new_item1 = item1.clone()
+
+  .. image:: ../images/clone_m2m_item_2.png
         :align: center
+3) CleanerVersion takes care of cloning and re-linking also the relationships::
 
-#) CleanerVersion takes care of cloning and re-linking also the relationships
+    # done automatically by cleanerversion when item1.clone() was called
 
-    .. image:: ../images/clone_m2m_item_3.png
+  .. image:: ../images/clone_m2m_item_3.png
         :align: center
 
 
 Removing objects from a versioned M2M relationship
 --------------------------------------------------
+Changing many-to-many relationships is only allowed when using the current version of the object.
 
-# TODO or remove
+Deleting an object from a many-to-many relationship results in the record in the relationship table being
+soft-deleted.  In other words, a ``version_end_date`` is set on the relationship record.
+
+The syntax for soft-deleting is the same as the standard Django Model deletion syntax::
+
+    # Various ways to remove one or more associations:
+    club.members.remove(person1)
+    club.members.remove(person2, person3)
+    club.members.remove(person4.id)
+    club.members = []
+
+Navigating between different versions of an object
+==================================================
+
+Accessing the version at a given point in time
+----------------------------------------------
+If you have an object item1, and know that it existed at some other time t1, you can get the other version like this::
+
+    # Will throw exception if no object exists:
+    version = Item.objects.as_of(t1).get(identity=item1.identity)
+
+    # Or like this, which will return None if no object exists:
+    version = Item.objects.as_of(t1).filter(identity=item1.identity).first()
+
+Accessing the current version of an object
+------------------------------------------
+``current_version(obj)`` will return the latest version of the obj, or ``None`` if no version is currently active.
+
+Note that if the current object thinks that it is the current object (e.g. ``version_end_date`` is ``None``),
+this does not check the database. This means that if you fetched a copy of obj, and some other code has
+created a new version of obj before you call ``current_version()``, you will get your existing obj returned,
+not the newest version from the database.
+::
+
+    current_version = Items.objects.current_version(item1)
+
+Accessing the previous and next versions of an object
+-----------------------------------------------------
+You can navigate between the versions of an object that you have.
+
+``previous_version(obj)`` will provide the previous version of obj.  If there is no previous version, the returned
+object will be the same object.
+::
+
+    previous = Items.objects.previous_version(item1)
+
+``next_version(obj)`` will provide the next version of obj.  If there is no next version, the returned
+object will be the same object.
+
+Note that if the current object's ``version_end_date`` is ``None``, this does not check the database.  This means that
+if you fetched a copy of obj, and some other code has created a new version of obj before you call ``next_version()``,
+you will get your existing obj returned, not the newest version from the database.
+::
+
+    next = Items.objects.next_version(item1)
 
 Known Issues
 ============
 
-* No `multi-table inheritance <https://docs.djangoproject.com/en/1.7/topics/db/models/#multi-table-inheritance>`_ support.
+* No `multi-table inheritance <https://docs.djangoproject.com/en/stable/topics/db/models/#multi-table-inheritance>`_ support.
   Multi-table inheritance currently does not work if the parent model has a Versionable base class.
   See `this issue <https://github.com/swisscom/cleanerversion/issues/19>`_ for more details.
 
