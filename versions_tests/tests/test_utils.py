@@ -82,6 +82,7 @@ class PostgresqlVersionUniqueTests(TransactionTestCase):
         )
 
 
+@skipUnless(AT_LEAST_17 and connection.vendor == 'postgresql', "Postgresql-specific test")
 class PostgresqlUuidLikeIndexesTest(TestCase):
     def test_no_like_indexes_on_uuid_columns(self):
         # Django creates like indexes on char columns.  In Django 1.7.x and below, there is no
