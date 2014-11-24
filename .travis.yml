@@ -1,21 +1,35 @@
 language: python
-python:
-  - "2.7"
-  - "3.4"
+python: "2.7"
+
 env:
-  - DJANGO_VERSION=1.6.7
-  - DJANGO_VERSION=1.6.8
-  - DJANGO_VERSION=1.7
-  - DJANGO_VERSION=1.7.1
+  - TOX_ENV=py27-django16-pg
+  - TOX_ENV=py27-django16-sqlite
+  - TOX_ENV=py27-django17-pg
+  - TOX_ENV=py27-django17-sqlite
+  - TOX_ENV=py34-django16-pg
+  - TOX_ENV=py34-django16-sqlite
+  - TOX_ENV=py34-django17-pg
+  - TOX_ENV=py34-django17-sqlite
+
+# Enable PostgreSQL usage
+addons:
+  - postgresql: "9.3"
 
 # Dependencies
 install:
-  - pip install -q django==$DJANGO_VERSION
+  - pip install tox
   - pip install coveralls
+
+# Ensure PostgreSQL-DB to be configured correctly
+before_script:
+  - cp -f cleanerversion/settings/pg_travis.py cleanerversion/settings/pg.py
+  - psql -c 'alter user postgres createdb;' -U postgres
+  - psql -c 'drop database if exists travis_ci_test;' -U postgres
+  - psql -c 'create database travis_ci_test with owner postgres;' -U postgres
 
 # Run tests
 script:
-  coverage run --source=versions ./manage.py test
+  tox -e $TOX_ENV
 
 # Run coveralls
 after_success:
