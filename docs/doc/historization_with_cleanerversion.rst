@@ -499,11 +499,73 @@ you will get your existing obj returned, not the newest version from the databas
 
     next = Items.objects.next_version(item1)
 
+
+Unique Indexes
+==============
+To have unique indexes with versioned models takes a bit of care. The issue here is that multiple versions having the same
+data can exist; potentially the only difference will be with the ``id``, ``version_start_date``, and ``version_end_date``
+columns.
+
+For example, what if we want the name and phone_number to be unique together for current versions:
+
++----------+----------+---------------------+---------------------+---------------------+--------------+--------------+
+| id (pk)  | identity | version_birth_date  | version_start_date  | version_end_date    | name         | phone_number |
++==========+==========+=====================+=====================+=====================+==============+==============+
+| 123      | 123      | 2014-08-14 14:43:00 | 2014-08-14 15:21:00 | None                | Petra Mauser | 555-1234     |
++----------+----------+---------------------+---------------------+---------------------+--------------+--------------+
+| 124      | 123      | 2014-08-14 14:43:00 | 2014-08-14 14:43:00 | 2014-08-14 15:09:00 | Peter Muster | 555-1234     |
++----------+----------+---------------------+---------------------+---------------------+--------------+--------------+
+
+In Postgresql, it's possible to create a
+`partially unique index <http://www.postgresql.org/docs/9.3/static/indexes-partial.html#INDEXES-PARTIAL-EX3>`_ which
+enforces that name and phone_number are unique together when the version_end_date is null.  Other databases may have
+a similar capability.  A helper method for creating these partially unique indexes is provided for Postgresql, see
+the `Postgresql specific`_ section for more detail.
+
+
+Postgresql specific
+===================
+Django creates `extra indexes <https://docs.djangoproject.com/en/1.7/ref/databases/#indexes-for-varchar-and-text-columns>`_
+for CharFields that are used for like queries (e.g. WHERE foo like 'fish%'). Since Django 1.6 and 1.7 do not support
+native database UUID fields, the UUID fields that are used for the id and identity columns of Versionable models have these extra
+indexes created.  In fact, these fields will never be compared using the like operator.  Leaving these indexes would create a
+performance penalty for inserts and updates, especially for larger tables.  ``versions.util.postgresql`` has a function
+``remove_uuid_id_like_indexes`` that can be used to remove these extra indexes.
+
+For the issue of `Unique Indexes`_, ``versions.util.postgresql`` has a function ``create_current_version_unique_indexes`` that can
+be used to create unique indexes.  For this to work, it's necessary to define a VERSION_UNIQUE attribute when defining the model::
+
+    class Person(Versionable):
+        name = models.CharField(max_length=40)
+        phone_number = models.CharField(max_length=20)
+
+        VERSION_UNIQUE = [['name', 'phone_number']]
+
+If there are multiple sets of columns that should be unique, use something like this::
+
+    VERSION_UNIQUE = [['field1', 'field2'], ['field3', 'field4']]
+
+For an example of how to transparently create the database indexes for these VERSION_UNIQUE definitions in a Django app, as well
+as removing the extra like indexes created on the CharField columns, see:
+
+* https://github.com/swisscom/cleanerversion/blob/master/versions_tests/__init__.py
+* https://github.com/swisscom/cleanerversion/blob/master/versions_tests/apps.py
+
+Note that this example is for Django >= 1.7; it makes use of the
+`application registry <https://docs.djangoproject.com/en/stable/ref/applications/>`_ that was introduced in Django 1.7.
+
+For Django 1.6, it is possible to do something similar.  The functions in ``versions.util.postgresql`` should be able to be used
+unchanged for Django 1.6.
+
+
 Known Issues
 ============
 
 * No `multi-table inheritance <https://docs.djangoproject.com/en/stable/topics/db/models/#multi-table-inheritance>`_ support.
   Multi-table inheritance currently does not work if the parent model has a Versionable base class.
   See `this issue <https://github.com/swisscom/cleanerversion/issues/19>`_ for more details.
+
+* Creating `Unique Indexes`_ is a bit tricky for versioned database tables.  A solution is provided for Postgresql (see the
+  `Postgresql specific`_ section).  Pull requests are welcome if you solve this problem for another database system.
 
 For a more up-to-date state please check our `project page <https://github.com/swisscom/cleanerversion>`_.

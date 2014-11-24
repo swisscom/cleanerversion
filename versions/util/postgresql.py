@@ -1,11 +1,20 @@
 from __future__ import absolute_import
+from django.db import connection as default_connection
 from versions.models import VersionedForeignKey
 from .helper import database_connection, versionable_models
 
-def index_exists(connection, index_name):
-    cursor = connection.cursor()
-    cursor.execute("SELECT COUNT(1) FROM pg_indexes WHERE indexname = %s",[index_name])
+
+def index_exists(cursor, index_name):
+    """
+    Checks if an index with the given name exists in the database
+
+    :param cursor: database connection cursor
+    :param index_name: string
+    :return: boolean
+    """
+    cursor.execute("SELECT COUNT(1) FROM pg_indexes WHERE indexname = %s", [index_name])
     return cursor.fetchone()[0] > 0
+
 
 def remove_uuid_id_like_indexes(app_name, database=None):
     """
@@ -22,13 +31,44 @@ def remove_uuid_id_like_indexes(app_name, database=None):
     """
 
     removed_indexes = 0
-    cursor = database_connection(database).cursor()
-    for model in versionable_models(app_name, include_auto_created=True):
-        # VersionedForeignKey fields as well as the id fields have these useless like indexes
-        field_names = ["'%s'" % f.column for f in model._meta.fields if isinstance(f, VersionedForeignKey)]
-        field_names.append("'id'")
+    with database_connection(database).cursor() as cursor:
+        for model in versionable_models(app_name, include_auto_created=True):
+            indexes = select_uuid_like_indexes_on_table(model, cursor)
+            if indexes:
+                index_list = ','.join(['"%s"' % r[0] for r in indexes])
+                cursor.execute("DROP INDEX %s" % index_list)
+                removed_indexes += len(indexes)
 
-        sql =  """
+    return removed_indexes
+
+
+def get_uuid_like_indexes_on_table(model):
+    """
+    Gets a list of database index names for the given model for the uuid-containing
+    fields that have had a like-index created on them.
+
+    :param model: Django model
+    :return: list of database rows; the first field of each row is an index name
+    """
+    with default_connection.cursor() as c:
+        indexes = select_uuid_like_indexes_on_table(model, c)
+    return indexes
+
+
+def select_uuid_like_indexes_on_table(model, cursor):
+    """
+    Gets a list of database index names for the given model for the uuid-containing
+    fields that have had a like-index created on them.
+
+    :param model: Django model
+    :param cursor: database connection cursor
+    :return: list of database rows; the first field of each row is an index name
+    """
+
+    # VersionedForeignKey fields as well as the id fields have these useless like indexes
+    field_names = ["'%s'" % f.column for f in model._meta.fields if isinstance(f, VersionedForeignKey)]
+    field_names.append("'id'")
+    sql = """
                 select i.relname as index_name
                 from pg_class t,
                      pg_class i,
@@ -43,15 +83,9 @@ def remove_uuid_id_like_indexes(app_name, database=None):
                   and a.attname in ({1})
                   and i.relname like '%_like'
             """.format(model._meta.db_table, ','.join(field_names))
+    cursor.execute(sql)
+    return cursor.fetchall()
 
-        cursor.execute(sql)
-        indexes = cursor.fetchall()
-        if indexes:
-            index_list = ','.join(['"%s"' % r[0] for r in indexes])
-            cursor.execute("DROP INDEX %s" % index_list)
-            removed_indexes += len(indexes)
-
-    return removed_indexes
 
 def create_current_version_unique_indexes(app_name, database=None):
     """
@@ -71,24 +105,24 @@ def create_current_version_unique_indexes(app_name, database=None):
 
     indexes_created = 0
     connection = database_connection(database)
-    cursor = connection.cursor()
-    for model in versionable_models(app_name):
-        unique_field_groups = getattr(model, 'VERSION_UNIQUE', None)
-        if not unique_field_groups:
-            continue
+    with connection.cursor() as cursor:
+        for model in versionable_models(app_name):
+            unique_field_groups = getattr(model, 'VERSION_UNIQUE', None)
+            if not unique_field_groups:
+                continue
 
-        table_name = model._meta.db_table
-        for group in unique_field_groups:
-            col_prefixes = []
-            columns = []
-            for field in group:
-                column = model._meta.get_field_by_name(field)[0].column
-                col_prefixes.append(column[0:3])
-                columns.append(column)
-            index_name = '%s_%s_%s_v_uniq' % (app_name, table_name, '_'.join(col_prefixes))
-            if not index_exists(connection, index_name):
-                cursor.execute("CREATE UNIQUE INDEX %s ON %s(%s) WHERE version_end_date IS NULL" % (index_name, table_name, ','.join(columns)))
-                indexes_created += 1
+            table_name = model._meta.db_table
+            for group in unique_field_groups:
+                col_prefixes = []
+                columns = []
+                for field in group:
+                    column = model._meta.get_field_by_name(field)[0].column
+                    col_prefixes.append(column[0:3])
+                    columns.append(column)
+                index_name = '%s_%s_%s_v_uniq' % (app_name, table_name, '_'.join(col_prefixes))
+                if not index_exists(cursor, index_name):
+                    cursor.execute("CREATE UNIQUE INDEX %s ON %s(%s) WHERE version_end_date IS NULL"
+                                   % (index_name, table_name, ','.join(columns)))
+                    indexes_created += 1
 
     return indexes_created
-

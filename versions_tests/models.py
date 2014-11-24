@@ -1,4 +1,4 @@
-from django.db.models import CharField
+from django.db.models import CharField, IntegerField
 
 from versions.models import Versionable, VersionedManyToManyField, VersionedForeignKey
 
@@ -132,3 +132,23 @@ class Subject(Versionable):
     observers = VersionedManyToManyField('Observer', related_name='subjects')
 
     __str__ = versionable_description
+
+
+############################################
+# VersionUniqueTests models
+class ChainStore(Versionable):
+    subchain_id = IntegerField()
+    city = CharField(max_length=40)
+    name = CharField(max_length=40)
+    opening_hours = CharField(max_length=40)
+    door_frame_color = VersionedForeignKey('Color')
+    door_color = VersionedForeignKey('Color', related_name='cs')
+
+    # There are lots of these chain stores.  They follow these rules:
+    # - only one store with the same name and subchain_id can exist in a single city
+    # - no two stores can share the same door_frame_color and door_color
+    # Yea, well, they want to appeal to people who want to be different.
+    VERSION_UNIQUE = [['subchain_id', 'city', 'name'], ['door_frame_color', 'door_color']]
+
+class Color(Versionable):
+   name = CharField(max_length=40)
