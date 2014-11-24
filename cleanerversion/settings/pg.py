@@ -9,9 +9,9 @@ from .base import *
 DATABASES = {
     'default': {
         'ENGINE': 'django.db.backends.postgresql_psycopg2',
-        'NAME': 'psqldb',
-        'USER': 'psqluser',
-        'PASSWORD': 'psqlpwd',
+        'NAME': 'cleanerversionpg',
+        'USER': 'cleanerversionpg',
+        'PASSWORD': 'cleanerversionpgpass',
         'HOST': '127.0.0.1',
         'PORT': '5432',
     },
