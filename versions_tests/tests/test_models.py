@@ -25,8 +25,8 @@ from unittest import skip, skipUnless
 import re
 
 from versions.models import Versionable, get_utc_now
-from versions_tests.models import Professor, Classroom, Student, Pupil, Teacher, Observer, B, Subject, Team, Player, \
-    City, Directory, C1, C2, C3
+from versions_tests.models import (Professor, Classroom, Student, Pupil, Teacher, Observer, B, Subject, Team, Player,
+                                   Award, City, Directory, C1, C2, C3)
 
 
 def get_relation_table(model_class, fieldname):
@@ -803,12 +803,12 @@ class OneToManyFilteringTest(TestCase):
                     ))
                 )
             WHERE (
-                (
+                "{player_table}"."name" LIKE p1% ESCAPE '\\\'
+                AND (
                     "{team_table}"."version_end_date" > {ts_wo_tz}
                     OR "{team_table}"."version_end_date" IS NULL
-                )
+                    )
                 AND "{team_table}"."version_start_date" <= {ts_wo_tz}
-                AND "{player_table}"."name" LIKE p1% ESCAPE '\\\'
             )
         """.format(ts=t5_utc_w_tz, ts_wo_tz=t5_utc_wo_tz, team_table=team_table, player_table=player_table)
         self.assertStringEqualIgnoreWhiteSpaces(expected_query, team_none_query)
@@ -1283,10 +1283,10 @@ class ManyToManyFilteringTest(TestCase):
                    ))
                )
          WHERE (
-               ("versions_tests_c1"."version_end_date" > {time_no_tz}
+               "versions_tests_c2"."name" LIKE c2% escape '\\'
+           AND ("versions_tests_c1"."version_end_date" > {time_no_tz}
                    OR "versions_tests_c1"."version_end_date" IS NULL)
            AND "versions_tests_c1"."version_start_date" <= {time_no_tz}
-           AND "versions_tests_c2"."name" LIKE c2% escape '\\'
                )
         """.format(time=t1_string, time_no_tz=t1_no_tz_string)
 
@@ -1382,10 +1382,10 @@ class ManyToManyFilteringTest(TestCase):
                    )
                 )
          WHERE (
-               ("versions_tests_c1"."version_end_date" > {time_no_tz}
+               "versions_tests_c3"."name" LIKE c3%  escape '\\'
+           AND ("versions_tests_c1"."version_end_date" > {time_no_tz}
                  OR "versions_tests_c1"."version_end_date" IS NULL)
            AND "versions_tests_c1"."version_start_date" <= {time_no_tz}
-           AND "versions_tests_c3"."name" LIKE c3%  escape '\\'
                )
         """.format(time=t1_string, time_no_tz=t1_no_tz_string)
         self.assertStringEqualIgnoreWhiteSpaces(expected_query, should_be_c1_query)
@@ -1602,3 +1602,97 @@ class PrefetchingTests(TestCase):
             )
         """.format(player_table=player_table, team_table=team_table, ts=t1_utc_w_tz, ts_wo_tz=t1_utc_wo_tz)
         self.assertStringEqualIgnoreWhiteSpaces(expected_query, select_related_query)
+
+    def test_prefetch_related_via_foreignkey(self):
+        with self.assertNumQueries(3):
+            team = Team.objects.as_of(self.t1).prefetch_related('player_set', 'city').first()
+            self.assertIsNotNone(team)
+
+        with self.assertNumQueries(0):
+            p1 = team.player_set.all()[0]
+            p2 = team.player_set.all()[1]
+            self.assertEqual(self.city1, team.city)
+
+        p3 = Player.objects.create(name='pl3.v1', team=self.team1)
+        p2 = self.p2.clone()
+        p2.name = 'pl2.v2'
+        p2.save()
+        p1.delete()
+
+        with self.assertNumQueries(3):
+            team = Team.objects.current.prefetch_related('player_set', 'city').first()
+            self.assertIsNotNone(team)
+
+        with self.assertNumQueries(0):
+            self.assertEqual(2, len(team.player_set.all()))
+            p1 = team.player_set.all()[0]
+            p2 = team.player_set.all()[1]
+            self.assertEqual(self.city1, team.city)
+
+        with self.assertNumQueries(3):
+            team = Team.objects.prefetch_related('player_set', 'city').first()
+            self.assertIsNotNone(team)
+
+        with self.assertNumQueries(0):
+            self.assertEqual(4, len(team.player_set.all()))
+            px = team.player_set.all()[1]
+            self.assertEqual(self.city1, team.city)
+
+    def test_prefetch_related_via_many_to_many(self):
+        awards = [Award.objects.create(name='award'+str(i)) for i in range(1, 11)]
+        cities = [City.objects.create(name='city-'+str(i)) for i in range(3)]
+        teams = []
+        for i in range(3):
+            for j in range(2):
+                teams.append(Team.objects.create(
+                    name='team-{}-{}'.format(i, j), city=cities[i]))
+        players = []
+        for i in range(6):
+            for j in range(6):
+                p = Player.objects.create(
+                    name='player-{}-{}'.format(i, j), team=teams[i])
+                if j % 2:
+                    p.awards.add(*awards[j-1:j-9])
+                players.append(p)
+
+        t2 = get_utc_now()
+
+        with self.assertNumQueries(6):
+            players_t2 = list(
+                Player.objects.as_of(t2).prefetch_related('team', 'awards') .filter(
+                    name__startswith='player-').order_by('name')
+            )
+            players_current = list(
+                Player.objects.current.prefetch_related('team', 'awards').filter(
+                    name__startswith='player-').order_by('name')
+            )
+
+        self.assertSetEqual(set(players_t2), set(players_current))
+
+        award_players = []
+        with self.assertNumQueries(0):
+            for i in range(len(players_current)):
+                t2_p = players_t2[i]
+                current_p = players_current[i]
+                self.assertEqual(t2_p.team.name, current_p.team.name)
+                if i % 2:
+                    self.assertGreater(len(t2_p.awards.all()), 0)
+                    self.assertSetEqual(set(t2_p.awards.all()), set(current_p.awards.all()))
+                    award_players.append(current_p)
+
+        name_list = []
+        for p in award_players:
+            p.awards.remove(p.awards.all()[0])
+            name_list.append(p.name)
+
+        with self.assertNumQueries(2):
+            updated_award_players = list(
+                Player.objects.current.prefetch_related('awards').filter(
+                    name__in=name_list).order_by('name')
+            )
+
+        with self.assertNumQueries(0):
+            for i in range(len(award_players)):
+                old = len(award_players[i].awards.all())
+                new = len(updated_award_players[i].awards.all())
+                self.assertTrue(new == old - 1)
