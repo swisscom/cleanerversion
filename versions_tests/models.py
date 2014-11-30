@@ -46,6 +46,10 @@ class Player(Versionable):
 
     __str__ = versionable_description
 
+class Award(Versionable):
+    name = CharField(max_length=200)
+    players = VersionedManyToManyField(Player, related_name='awards')
+
 
 ############################################
 # SelfOneToManyTest models
