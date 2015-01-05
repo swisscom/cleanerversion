@@ -549,6 +549,7 @@ class VersionedManyToManyField(ManyToManyField):
         meta = type('Meta', (object,), {
             # 'unique_together': (from_, to),
             'auto_created': cls,
+            'db_tablespace': cls._meta.db_tablespace,
             'app_label': cls._meta.app_label,
         })
         return type(str(name), (Versionable,), {
