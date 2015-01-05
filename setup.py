@@ -21,7 +21,7 @@ If you get errors, check the following things:
 """
 
 setup(name='CleanerVersion',
-      version='1.3.5',
+      version='1.4.0',
       description='A versioning solution for relational data models using the Django ORM',
       long_description='CleanerVersion is a solution that allows you to read and write multiple versions of an entry '
                        'to and from your relational database. It allows to keep track of modifications on an object '
