@@ -532,6 +532,7 @@ class VersionedManyToManyField(ManyToManyField):
         if not isinstance(field.rel.to, six.string_types):
             to = field.rel.to._meta.object_name
         name = '%s_%s' % (from_, field_name)
+        to_field_name = to.lower()
 
         # Since Django 1.7, a migration mechanism is shipped by default with Django. This migration module loads all
         # declared apps' models inside a __fake__ module.
@@ -554,7 +555,7 @@ class VersionedManyToManyField(ManyToManyField):
             'Meta': meta,
             '__module__': cls.__module__,
             from_: VersionedForeignKey(cls, related_name='%s+' % name),
-            to: VersionedForeignKey(to, related_name='%s+' % name),
+            to_field_name: VersionedForeignKey(to, related_name='%s+' % name),
         })
 
 
