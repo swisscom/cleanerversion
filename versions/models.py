@@ -1032,18 +1032,17 @@ class Versionable(models.Model):
             # This condition might save us a lot of database queries if we are being called
             # from a loop like in .clone_relations
             earlier_version.save()
+            later_version.save()
         else:
             earlier_version._not_created = True
 
-        later_version.save()
-
         # re-create ManyToMany relations
         for field in earlier_version._meta.many_to_many:
-            earlier_version.clone_relations(later_version, field.attname)
+            earlier_version.clone_relations(later_version, field.attname, forced_version_date)
 
         if hasattr(earlier_version._meta, 'many_to_many_related'):
             for rel in earlier_version._meta.many_to_many_related:
-                earlier_version.clone_relations(later_version, rel.via_field_name)
+                earlier_version.clone_relations(later_version, rel.via_field_name, forced_version_date)
 
         return later_version
 
@@ -1068,7 +1067,7 @@ class Versionable(models.Model):
         self.version_birth_date = self.version_start_date = timestamp
         return self
 
-    def clone_relations(self, clone, manager_field_name):
+    def clone_relations(self, clone, manager_field_name, forced_version_date):
         # Source: the original object, where relations are currently pointing to
         source = getattr(self, manager_field_name)  # returns a VersionedRelatedManager instance
         # Destination: the clone, where the cloned relations should point to
@@ -1078,15 +1077,19 @@ class Versionable(models.Model):
         # retrieve all current m2m relations pointing the newly created clone
         # filter for source_id
         m2m_rels = list(source.through.objects.filter(**{source.source_field.attname: clone.id}))
+        later = []
         for rel in m2m_rels:
             # Only clone the relationship, if it is the current one; Simply adjust the older ones to point the old entry
             # Otherwise, the number of pointers pointing an entry will grow exponentially
             if rel.is_current:
-                rel.clone(forced_version_date=self.version_end_date, in_bulk=True)
+                later.append(rel.clone(forced_version_date=self.version_end_date, in_bulk=True))
             # On rel, set the source ID to self.id
             setattr(rel, source.source_field_name, self)
             if not hasattr(rel, '_not_created') or not rel._not_created:
                 rel.save()
+        # Perform the bulk changes rel.clone() did not perform because of the in_bulk parameter
+        # This saves a huge bunch of SQL queries
+        source.through.objects.filter(id__in=[l.id for l in later]).update(**{'version_start_date': forced_version_date})
         source.through.objects.bulk_create([r for r in m2m_rels if hasattr(r, '_not_created') and r._not_created])
 
     @staticmethod
