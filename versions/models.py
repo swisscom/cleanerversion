@@ -1072,7 +1072,8 @@ class Versionable(models.Model):
         source = getattr(self, manager_field_name)  # returns a VersionedRelatedManager instance
         # Destination: the clone, where the cloned relations should point to
         destination = getattr(clone, manager_field_name)
-        destination.add(*list(source.all()))
+        for item in source.all():
+            destination.add(item)
 
         # retrieve all current m2m relations pointing the newly created clone
         # filter for source_id
