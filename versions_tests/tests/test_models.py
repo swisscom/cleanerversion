@@ -1696,3 +1696,15 @@ class PrefetchingTests(TestCase):
                 old = len(award_players[i].awards.all())
                 new = len(updated_award_players[i].awards.all())
                 self.assertTrue(new == old - 1)
+
+
+class FilterOnRelationTest(TestCase):
+    def test_filter_on_relation(self):
+        team = Team.objects.create(name='team')
+        player = Player.objects.create(name='player', team=team)
+        t1 = get_utc_now()
+        sleep(0.1)
+        l1 = len(Player.objects.as_of(t1).filter(team__name='team'))
+        team.clone()
+        l2 = len(Player.objects.as_of(t1).filter(team__name='team'))
+        self.assertEqual(l1, l2)
