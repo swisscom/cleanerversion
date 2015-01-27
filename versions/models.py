@@ -1078,19 +1078,24 @@ class Versionable(models.Model):
         # retrieve all current m2m relations pointing the newly created clone
         # filter for source_id
         m2m_rels = list(source.through.objects.filter(**{source.source_field.attname: clone.id}))
-        later = []
+        later_current = []
+        later_non_current = []
         for rel in m2m_rels:
             # Only clone the relationship, if it is the current one; Simply adjust the older ones to point the old entry
             # Otherwise, the number of pointers pointing an entry will grow exponentially
             if rel.is_current:
-                later.append(rel.clone(forced_version_date=self.version_end_date, in_bulk=True))
-            # On rel, set the source ID to self.id
-            setattr(rel, source.source_field_name, self)
-            if not hasattr(rel, '_not_created') or not rel._not_created:
-                rel.save()
+                later_current.append(rel.clone(forced_version_date=self.version_end_date, in_bulk=True))
+                # On rel, which is no more 'current', set the source ID to self.id
+                setattr(rel, source.source_field_name, self)
+            else:
+                later_non_current.append(rel)
         # Perform the bulk changes rel.clone() did not perform because of the in_bulk parameter
-        # This saves a huge bunch of SQL queries
-        source.through.objects.filter(id__in=[l.id for l in later]).update(**{'version_start_date': forced_version_date})
+        # This saves a huge bunch of SQL queries:
+        # - update current version entries
+        source.through.objects.filter(id__in=[l.id for l in later_current]).update(**{'version_start_date': forced_version_date})
+        # - update entries that have been pointing the current object, but have never been 'current'
+        source.through.objects.filter(id__in=[l.id for l in later_non_current]).update(**{source.source_field.attname: self.id})
+        # - create entries that were 'current', but which have been relieved in this method run
         source.through.objects.bulk_create([r for r in m2m_rels if hasattr(r, '_not_created') and r._not_created])
 
     @staticmethod
