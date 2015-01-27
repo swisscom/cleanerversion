@@ -479,6 +479,33 @@ class VersionedForeignKey(ForeignKey):
         return where_class([VersionedExtraWhere(historic_sql=historic_sql, current_sql=current_sql, alias=alias,
                                                 remote_alias=remote_alias)])
 
+    def get_joining_columns(self, reverse_join=False):
+        """
+        Get and return joining columns defined by this foreign key relationship
+
+        :return: A tuple containing the column names of the tables to be joined (<local_col_name>, <remote_col_name>)
+        :rtype: tuple
+        """
+        source = self.reverse_related_fields if reverse_join else self.related_fields
+        joining_columns = tuple()
+        for lhs_field, rhs_field in source:
+            lhs_col_name = lhs_field.column
+            rhs_col_name = rhs_field.column
+            if self is lhs_field:
+                # self is the current ForeignKey relationship
+                if rhs_col_name == Versionable.VERSION_IDENTIFIER_FIELD:
+                    rhs_col_name = Versionable.OBJECT_IDENTIFIER_FIELD
+            elif self is rhs_field:
+                if lhs_col_name == Versionable.VERSION_IDENTIFIER_FIELD:
+                    lhs_col_name = Versionable.OBJECT_IDENTIFIER_FIELD
+            joining_columns = joining_columns + ((lhs_col_name, rhs_col_name),)
+        # joining_columns = super(VersionedForeignKey, self).get_joining_columns(reverse_join)
+        # TODO:
+        # if remote col is id and remote col is primary key and remote model is versioned:
+        # then replace id by identity
+        return joining_columns
+
+
 
 class VersionedManyToManyField(ManyToManyField):
     def __init__(self, *args, **kwargs):
@@ -916,6 +943,9 @@ class Versionable(models.Model):
     """
     This is pretty much the central point for versioning objects.
     """
+
+    VERSION_IDENTIFIER_FIELD = 'id'
+    OBJECT_IDENTIFIER_FIELD = 'identity'
 
     id = models.CharField(max_length=36, primary_key=True)
     """id stands for ID and is the primary key; sometimes also referenced as the surrogate key"""
