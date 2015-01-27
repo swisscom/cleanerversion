@@ -1094,7 +1094,7 @@ class Versionable(models.Model):
         # - update current version entries
         source.through.objects.filter(id__in=[l.id for l in later_current]).update(**{'version_start_date': forced_version_date})
         # - update entries that have been pointing the current object, but have never been 'current'
-        source.through.objects.filter(id__in=[l.id for l in later_non_current]).update(**{source.source_field.attname: self.id})
+        source.through.objects.filter(id__in=[l.id for l in later_non_current]).update(**{source.source_field_name: self})
         # - create entries that were 'current', but which have been relieved in this method run
         source.through.objects.bulk_create([r for r in m2m_rels if hasattr(r, '_not_created') and r._not_created])
 
