@@ -309,7 +309,7 @@ class VersionedQuery(Query):
         (e.g. by adding a filter to the queryset) does not allow the caching of related
         object to work (they are attached to a queryset; filter() returns a new queryset).
         """
-        if self.querytime.active:
+        if self.querytime.active and (not hasattr(self, '_querytime_filter_added') or not self._querytime_filter_added):
             time = self.querytime.time
             if time is None:
                 self.add_q(Q(version_end_date__isnull=True))
@@ -318,6 +318,9 @@ class VersionedQuery(Query):
                     (Q(version_end_date__gt=time) | Q(version_end_date__isnull=True))
                     & Q(version_start_date__lte=time)
                 )
+            # Ensure applying these filters happens only a single time (even if it doesn't falsify the query, it's
+            # just not very comfortable to read)
+            self._querytime_filter_added = True
         return super(VersionedQuery, self).get_compiler(*args, **kwargs)
 
 
@@ -502,7 +505,6 @@ class VersionedForeignKey(ForeignKey):
                     lhs_col_name = Versionable.OBJECT_IDENTIFIER_FIELD
             joining_columns = joining_columns + ((lhs_col_name, rhs_col_name),)
         return joining_columns
-
 
 
 class VersionedManyToManyField(ManyToManyField):

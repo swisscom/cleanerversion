@@ -678,6 +678,10 @@ class OneToManyFilteringTest(TestCase):
 
         self.t1 = get_utc_now()
         sleep(0.1)
+        # State at t1
+        # Players: [p1.v1, p2.v1]
+        # Teams: [t.v1]
+        # t.player_set = [p1, p2]
 
         team.player_set.remove(p2)
 
@@ -687,6 +691,10 @@ class OneToManyFilteringTest(TestCase):
 
         self.t2 = get_utc_now()
         sleep(0.1)
+        # State at t2
+        # Players: [p1.v1, p2.v1, p2.v2]
+        # Teams: [t.v1]
+        # t.player_set = [p1]
 
         team.player_set.remove(p1)
 
@@ -696,6 +704,10 @@ class OneToManyFilteringTest(TestCase):
 
         self.t3 = get_utc_now()
         sleep(0.1)
+        # State at t3
+        # Players: [p1.v1, p2.v1, p2.v2, p1.v2]
+        # Teams: [t.v1]
+        # t.player_set = []
 
         # Let's get those players back into the game!
         team.player_set.add(p1)
@@ -711,10 +723,18 @@ class OneToManyFilteringTest(TestCase):
 
         self.t4 = get_utc_now()
         sleep(0.1)
+        # State at t4
+        # Players: [p1.v1, p2.v1, p2.v2, p1.v2, p2.v3, p1.v3]
+        # Teams: [t.v1]
+        # t.player_set = [p1, p2]
 
         p1.delete()
 
         self.t5 = get_utc_now()
+        # State at t4
+        # Players: [p1.v1, p2.v1, p2.v2, p1.v2, p2.v3, p1.v3]
+        # Teams: [t.v1]
+        # t.player_set = [p2]
 
     def test_filtering_on_the_other_side_of_the_relation(self):
         self.assertEqual(1, Team.objects.all().count())
@@ -774,6 +794,8 @@ class OneToManyFilteringTest(TestCase):
     @skipUnless(connection.vendor == 'sqlite', 'SQL is database specific, only sqlite is tested here.')
     def test_query_created_by_filtering_for_deleted_player_at_t5(self):
         team_none_queryset = Team.objects.as_of(self.t5).filter(player__name__startswith='p1')
+        # Validating the current query prior to analyzing the generated SQL
+        self.assertEqual([], list(team_none_queryset))
         team_none_query = str(team_none_queryset.query)
 
         team_table = Team._meta.db_table
@@ -1566,7 +1588,10 @@ class PrefetchingTests(TestCase):
 
     @skipUnless(connection.vendor == 'sqlite', 'SQL is database specific, only sqlite is tested here.')
     def test_select_related_query_sqlite(self):
-        select_related_query = str(Player.objects.as_of(self.t1).select_related('team').all().query)
+        select_related_queryset = Player.objects.as_of(self.t1).select_related('team').all()
+        # Validating the query before verifying the SQL string
+        self.assertEqual(['pl1.v1', 'pl2.v1'], [player.name for player in select_related_queryset])
+        select_related_query = str(select_related_queryset.query)
 
         team_table = Team._meta.db_table
         player_table = Player._meta.db_table
@@ -1625,7 +1650,7 @@ class PrefetchingTests(TestCase):
                    "{team_table}"."name",
                    "{team_table}"."city_id"
             FROM "{player_table}"
-            LEFT OUTER JOIN "{team_table}" ON ("{player_table}"."team_id" = "{team_table}"."id"
+            LEFT OUTER JOIN "{team_table}" ON ("{player_table}"."team_id" = "{team_table}"."identity"
                                                       AND (({team_table}.version_start_date <= {ts}
                                                             AND ({team_table}.version_end_date > {ts}
                                                                  OR {team_table}.version_end_date IS NULL))))
