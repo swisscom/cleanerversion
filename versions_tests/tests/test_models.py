@@ -1083,6 +1083,41 @@ class MultiM2MTest(TestCase):
         # to restrict the records according to the desired as_of time.
         self.assertEqual(3, len(Student.objects.current.annotate(num_teachers=Count('professors')).all()))
 
+    def test_constant_number_of_queries_when_cloning_m2m_related_object(self):
+        """
+        This test aims to verify whether the number of queries against the DB remains constant,
+        even if the number of M2M relations has grown.
+        This test was necessary in order to verify changes from PR #44
+        """
+        annika = Student.objects.current.get(name='Annika')
+        nb_professors = annika.professors.count()
+        nb_classrooms = annika.classrooms.count()
+        # Annika, at this point, has:
+        # - 3 professors
+        # - 3 classrooms
+
+        # There are 12 queries against the DB:
+        # - 3 for writing the new version of the object itself
+        #   o 1 attempt to update the earlier version
+        #   o 1 insert of the earlier version
+        #   o 1 update of the later version
+        # - 5 for the professors relationship
+        #   o 1 for selecting all concerned professor objects
+        #   o 1 for selecting all concerned intermediate table entries (student_professor)
+        #   o 1 for updating current intermediate entry versions
+        #   o 1 for non-current rel-entries pointing the annika-object
+        #     (there's 1 originating from the clone-operation on mr_biggs)
+        #   o 1 for inserting new versions
+        # - 4 for the classrooms M2M relationship
+        #   o 1 for selecting all concerned classroom objects
+        #   o 1 for selecting all concerned intermediate table entries (student_classroom)
+        #   o 1 for updating current intermediate entry versions
+        #   o 0 for non-current rel-entries pointing the annika-object
+        #   o 1 for inserting new versions
+
+        with self.assertNumQueries(12):
+            annika.clone()
+
 
 class MultiM2MToSameTest(TestCase):
     """
