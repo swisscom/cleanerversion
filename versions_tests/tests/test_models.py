@@ -1097,8 +1097,8 @@ class MultiM2MTest(TestCase):
 
         # There are 12 queries against the DB:
         # - 3 for writing the new version of the object itself
-        # o 1 attempt to update the earlier version
-        # o 1 insert of the earlier version
+        #   o 1 attempt to update the earlier version
+        #   o 1 insert of the earlier version
         #   o 1 update of the later version
         # - 5 for the professors relationship
         #   o 1 for selecting all concerned professor objects
