@@ -15,14 +15,15 @@
 import datetime
 from time import sleep
 import itertools
+from unittest import skip, skipUnless
+import re
+
 from django.core.exceptions import SuspiciousOperation, ObjectDoesNotExist, MultipleObjectsReturned, ValidationError
 from django.db import connection
 from django.db.models import Q, Count, Sum
 from django.test import TestCase
 from django.utils.timezone import utc
 from django.utils import six
-from unittest import skip, skipUnless
-import re
 
 from versions.models import Versionable, get_utc_now
 from versions_tests.models import (Professor, Classroom, Student, Pupil, Teacher, Observer, B, Subject, Team, Player,
@@ -1090,16 +1091,14 @@ class MultiM2MTest(TestCase):
         This test was necessary in order to verify changes from PR #44
         """
         annika = Student.objects.current.get(name='Annika')
-        nb_professors = annika.professors.count()
-        nb_classrooms = annika.classrooms.count()
         # Annika, at this point, has:
         # - 3 professors
         # - 3 classrooms
 
         # There are 12 queries against the DB:
         # - 3 for writing the new version of the object itself
-        #   o 1 attempt to update the earlier version
-        #   o 1 insert of the earlier version
+        # o 1 attempt to update the earlier version
+        # o 1 insert of the earlier version
         #   o 1 update of the later version
         # - 5 for the professors relationship
         #   o 1 for selecting all concerned professor objects
@@ -1114,9 +1113,67 @@ class MultiM2MTest(TestCase):
         #   o 1 for updating current intermediate entry versions
         #   o 0 for non-current rel-entries pointing the annika-object
         #   o 1 for inserting new versions
-
         with self.assertNumQueries(12):
             annika.clone()
+
+    def test_no_duplicate_m2m_entries_after_cloning_related_object(self):
+        """
+        This test ensures there are no duplicate entries added when cloning an object participating
+        in a M2M relationship.
+        It ensures the absence of duplicate entries on all modified levels:
+        - at the object-model level
+        - at any relationship level (intermediary tables)
+        """
+        annika = Student.objects.current.get(name='Annika')
+        student_professors_mgr = annika.professors
+        student_classrooms_mgr = annika.classrooms
+        # Annika, at this point, has:
+        # - 3 professors
+        # - 3 classrooms
+
+        # Check the PRE-CLONE state
+        annika_pre_clone = annika
+        # There's 1 Student instance (named Annika)
+        self.assertEqual(1, Student.objects.filter(identity=annika.identity).count())
+        # There are 4 links to 3 professors (Mr. Biggs has been cloned once when setting up, thus 1 additional link)
+        student_professor_links = list(student_professors_mgr.through.objects.filter(
+            **{student_professors_mgr.source_field_name: annika_pre_clone}))
+        self.assertEqual(4, len(student_professor_links))
+        # There are 3 links to classrooms
+        student_classroom_links = list(student_classrooms_mgr.through.objects.filter(
+            **{student_classrooms_mgr.source_field_name: annika_pre_clone}))
+        self.assertEqual(3, len(student_classroom_links))
+
+        # Do the CLONE that also impacts the number of linking entries
+        annika_post_clone = annika.clone()
+
+        # Check the POST-CLONE state
+        # There are 2 Student instances (named Annika)
+        self.assertEqual(2, Student.objects.filter(identity=annika.identity).count())
+
+        # There are 7 links to 3 professors
+        # - 4 of them are pointing the previous annika-object (including the non-current link to Mr. Biggs)
+        # - 3 of them are pointing the current annika-object (only current links were taken over)
+        student_professor_links = list(student_professors_mgr.through.objects.filter(
+            Q(**{student_professors_mgr.source_field_name: annika_pre_clone}) |
+            Q(**{student_professors_mgr.source_field_name: annika_post_clone})))
+        self.assertEqual(7, len(student_professor_links))
+        self.assertEqual(4, student_professors_mgr.through.objects.filter(
+            Q(**{student_professors_mgr.source_field_name: annika_pre_clone})).count())
+        self.assertEqual(3, student_professors_mgr.through.objects.filter(
+            Q(**{student_professors_mgr.source_field_name: annika_post_clone})).count())
+
+        # There are 6 links to 3 professors
+        # - 3 of them are pointing the previous annika-object
+        # - 3 of them are pointing the current annika-object
+        student_classroom_links = list(student_classrooms_mgr.through.objects.filter(
+            Q(**{student_classrooms_mgr.source_field_name: annika_pre_clone}) |
+            Q(**{student_classrooms_mgr.source_field_name: annika_post_clone})))
+        self.assertEqual(6, len(student_classroom_links))
+        self.assertEqual(3, student_classrooms_mgr.through.objects.filter(
+            Q(**{student_classrooms_mgr.source_field_name: annika_pre_clone})).count())
+        self.assertEqual(3, student_classrooms_mgr.through.objects.filter(
+            Q(**{student_classrooms_mgr.source_field_name: annika_post_clone})).count())
 
 
 class MultiM2MToSameTest(TestCase):
@@ -1229,8 +1286,8 @@ class ManyToManyFilteringTest(TestCase):
         sleep(0.1)
         self.t2 = get_utc_now()
         # at t2:
-        #   c1.c2s = [c2]
-        #   c2.c3s = [c3, c3a]
+        # c1.c2s = [c2]
+        # c2.c3s = [c3, c3a]
 
         c1 = c1.clone()
         c1.name = 'c1.v2'
@@ -1674,8 +1731,8 @@ class PrefetchingTests(TestCase):
             self.assertEqual(self.city1, team.city)
 
     def test_prefetch_related_via_many_to_many(self):
-        awards = [Award.objects.create(name='award'+str(i)) for i in range(1, 11)]
-        cities = [City.objects.create(name='city-'+str(i)) for i in range(3)]
+        awards = [Award.objects.create(name='award' + str(i)) for i in range(1, 11)]
+        cities = [City.objects.create(name='city-' + str(i)) for i in range(3)]
         teams = []
         for i in range(3):
             for j in range(2):
@@ -1687,14 +1744,14 @@ class PrefetchingTests(TestCase):
                 p = Player.objects.create(
                     name='player-{}-{}'.format(i, j), team=teams[i])
                 if j % 2:
-                    p.awards.add(*awards[j-1:j-9])
+                    p.awards.add(*awards[j - 1:j - 9])
                 players.append(p)
 
         t2 = get_utc_now()
 
         with self.assertNumQueries(6):
             players_t2 = list(
-                Player.objects.as_of(t2).prefetch_related('team', 'awards') .filter(
+                Player.objects.as_of(t2).prefetch_related('team', 'awards').filter(
                     name__startswith='player-').order_by('name')
             )
             players_current = list(
