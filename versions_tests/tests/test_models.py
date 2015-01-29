@@ -793,7 +793,7 @@ class OneToManyFilteringTest(TestCase):
             FROM "{team_table}"
             INNER JOIN
                 "{player_table}" ON (
-                    "{team_table}"."id" = "{player_table}"."team_id"
+                    "{team_table}"."identity" = "{player_table}"."team_id"
                     AND ((
                         {player_table}.version_start_date <= {ts}
                         AND (
@@ -1588,7 +1588,7 @@ class PrefetchingTests(TestCase):
                    "{team_table}"."name",
                    "{team_table}"."city_id"
             FROM "{player_table}"
-            LEFT OUTER JOIN "{team_table}" ON ("{player_table}"."team_id" = "{team_table}"."id"
+            LEFT OUTER JOIN "{team_table}" ON ("{player_table}"."team_id" = "{team_table}"."identity"
                                                       AND (({team_table}.version_start_date <= {ts}
                                                             AND ({team_table}.version_end_date > {ts}
                                                                  OR {team_table}.version_end_date IS NULL))))
@@ -1733,8 +1733,8 @@ class PrefetchingTests(TestCase):
                 self.assertTrue(new == old - 1)
 
 
-class FilterOnRelationTest(TestCase):
-    def test_filter_on_relation(self):
+class FilterOnForeignKeyRelationTest(TestCase):
+    def test_filter_on_fk_relation(self):
         team = Team.objects.create(name='team')
         player = Player.objects.create(name='player', team=team)
         t1 = get_utc_now()

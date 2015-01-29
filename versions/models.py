@@ -491,18 +491,16 @@ class VersionedForeignKey(ForeignKey):
         for lhs_field, rhs_field in source:
             lhs_col_name = lhs_field.column
             rhs_col_name = rhs_field.column
-            if self is lhs_field:
-                # self is the current ForeignKey relationship
+            # Test whether
+            # - self is the current ForeignKey relationship
+            # - self was not auto_created (e.g. is not part of a M2M relationship)
+            if self is lhs_field and not self.auto_created:
                 if rhs_col_name == Versionable.VERSION_IDENTIFIER_FIELD:
                     rhs_col_name = Versionable.OBJECT_IDENTIFIER_FIELD
-            elif self is rhs_field:
+            elif self is rhs_field and not self.auto_created:
                 if lhs_col_name == Versionable.VERSION_IDENTIFIER_FIELD:
                     lhs_col_name = Versionable.OBJECT_IDENTIFIER_FIELD
             joining_columns = joining_columns + ((lhs_col_name, rhs_col_name),)
-        # joining_columns = super(VersionedForeignKey, self).get_joining_columns(reverse_join)
-        # TODO:
-        # if remote col is id and remote col is primary key and remote model is versioned:
-        # then replace id by identity
         return joining_columns
 
 
@@ -584,8 +582,8 @@ class VersionedManyToManyField(ManyToManyField):
         return type(str(name), (Versionable,), {
             'Meta': meta,
             '__module__': cls.__module__,
-            from_: VersionedForeignKey(cls, related_name='%s+' % name),
-            to_field_name: VersionedForeignKey(to, related_name='%s+' % name),
+            from_: VersionedForeignKey(cls, related_name='%s+' % name, auto_created=name),
+            to_field_name: VersionedForeignKey(to, related_name='%s+' % name, auto_created=name),
         })
 
 
