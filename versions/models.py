@@ -626,7 +626,7 @@ class VersionedForeignRelatedObjectsDescriptor(ForeignRelatedObjectsDescriptor):
                 queryset = super(VersionedRelatedManager, self).get_queryset()
                 # Do not set the query time if it is already correctly set.  queryset.as_of() returns a clone
                 # of the queryset, and this will destroy the prefetched objects cache if it exists.
-                if self.instance._querytime.active and queryset.querytime != self.instance._querytime:
+                if isinstance(queryset, VersionedQuerySet) and self.instance._querytime.active and queryset.querytime != self.instance._querytime:
                     queryset = queryset.as_of(self.instance._querytime.time)
                 return queryset
 

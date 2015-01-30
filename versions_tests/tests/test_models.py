@@ -15,18 +15,19 @@
 import datetime
 from time import sleep
 import itertools
+from unittest import skip, skipUnless
+import re
+
 from django.core.exceptions import SuspiciousOperation, ObjectDoesNotExist, MultipleObjectsReturned, ValidationError
 from django.db import connection
 from django.db.models import Q, Count, Sum
 from django.test import TestCase
 from django.utils.timezone import utc
 from django.utils import six
-from unittest import skip, skipUnless
-import re
 
 from versions.models import Versionable, get_utc_now
 from versions_tests.models import (Professor, Classroom, Student, Pupil, Teacher, Observer, B, Subject, Team, Player,
-                                   Award, City, Directory, C1, C2, C3)
+                                   Award, City, Directory, C1, C2, C3, Wine, WineDrinker, WineDrinkerHat)
 
 
 def get_relation_table(model_class, fieldname):
@@ -1229,8 +1230,8 @@ class ManyToManyFilteringTest(TestCase):
         sleep(0.1)
         self.t2 = get_utc_now()
         # at t2:
-        #   c1.c2s = [c2]
-        #   c2.c3s = [c3, c3a]
+        # c1.c2s = [c2]
+        # c2.c3s = [c3, c3a]
 
         c1 = c1.clone()
         c1.name = 'c1.v2'
@@ -1241,8 +1242,8 @@ class ManyToManyFilteringTest(TestCase):
         sleep(0.1)
         self.t3 = get_utc_now()
         # at t3:
-        #   c1.c2s = [c2]
-        #   c2.c3s = [c3]
+        # c1.c2s = [c2]
+        # c2.c3s = [c3]
 
     def test_filtering_one_jump(self):
         """
@@ -1674,8 +1675,8 @@ class PrefetchingTests(TestCase):
             self.assertEqual(self.city1, team.city)
 
     def test_prefetch_related_via_many_to_many(self):
-        awards = [Award.objects.create(name='award'+str(i)) for i in range(1, 11)]
-        cities = [City.objects.create(name='city-'+str(i)) for i in range(3)]
+        awards = [Award.objects.create(name='award' + str(i)) for i in range(1, 11)]
+        cities = [City.objects.create(name='city-' + str(i)) for i in range(3)]
         teams = []
         for i in range(3):
             for j in range(2):
@@ -1687,14 +1688,14 @@ class PrefetchingTests(TestCase):
                 p = Player.objects.create(
                     name='player-{}-{}'.format(i, j), team=teams[i])
                 if j % 2:
-                    p.awards.add(*awards[j-1:j-9])
+                    p.awards.add(*awards[j - 1:j - 9])
                 players.append(p)
 
         t2 = get_utc_now()
 
         with self.assertNumQueries(6):
             players_t2 = list(
-                Player.objects.as_of(t2).prefetch_related('team', 'awards') .filter(
+                Player.objects.as_of(t2).prefetch_related('team', 'awards').filter(
                     name__startswith='player-').order_by('name')
             )
             players_current = list(
@@ -1731,3 +1732,96 @@ class PrefetchingTests(TestCase):
                 old = len(award_players[i].awards.all())
                 new = len(updated_award_players[i].awards.all())
                 self.assertTrue(new == old - 1)
+
+
+class IntegrationNonVersionableModelsTests(TestCase):
+    def setUp(self):
+        self.bordeaux = Wine.objects.create(name="Bordeaux", vintage=2004)
+        self.barolo = Wine.objects.create(name="Barolo", vintage=2010)
+        self.port = Wine.objects.create(name="Port wine", vintage=2014)
+
+        self.jacques = WineDrinker.objects.create(name='Jacques', glass_content=self.bordeaux)
+        self.alfonso = WineDrinker.objects.create(name='Alfonso', glass_content=self.barolo)
+        self.jackie = WineDrinker.objects.create(name='Jackie', glass_content=self.port)
+
+        self.red_sailor_hat = WineDrinkerHat.objects.create(shape='Sailor', color='red', wearer=self.jackie)
+        self.blue_turban_hat = WineDrinkerHat.objects.create(shape='Turban', color='blue', wearer=self.alfonso)
+        self.green_vagabond_hat = WineDrinkerHat.objects.create(shape='Vagabond', color='green', wearer=self.jacques)
+        self.pink_breton_hat = WineDrinkerHat.objects.create(shape='Breton', color='pink')
+
+        self.t1 = get_utc_now()
+        sleep(0.1)
+
+        self.jacques = self.jacques.clone()
+        # Jacques wants to try the italian stuff...
+        self.jacques.glass_content = self.barolo
+        self.jacques.save()
+
+        self.t2 = get_utc_now()
+        sleep(0.1)
+
+        # Jacques gets a bit dizzy and pinches Jackie's hat
+        self.red_sailor_hat.wearer = self.jacques
+        self.red_sailor_hat.save()
+
+        self.t3 = get_utc_now()
+        sleep(0.1)
+
+    def test_accessibility_of_versions_and_non_versionables_via_plain_fk(self):
+        # Access coming from a Versionable (reverse access)
+        jacques_current = WineDrinker.objects.current.get(name='Jacques')
+        jacques_t2 = WineDrinker.objects.as_of(self.t2).get(name='Jacques')
+        jacques_t1 = WineDrinker.objects.as_of(self.t1).get(name='Jacques')
+
+        self.assertEqual(jacques_current, jacques_t2)
+
+        self.assertEqual('Barolo', jacques_t2.glass_content.name)
+        self.assertEqual('Bordeaux', jacques_t1.glass_content.name)
+
+        # Access coming from plain Models (direct access)
+        barolo = Wine.objects.get(name='Barolo')
+        all_time_barolo_drinkers = barolo.drinkers.all()
+        self.assertEqual({'Alfonso', 'Jacques'}, {winedrinker.name for winedrinker in all_time_barolo_drinkers})
+
+        t1_barolo_drinkers = barolo.drinkers.as_of(self.t1).all()
+        self.assertEqual({'Alfonso'}, {winedrinker.name for winedrinker in t1_barolo_drinkers})
+
+        t2_barolo_drinkers = barolo.drinkers.as_of(self.t2).all()
+        self.assertEqual({'Alfonso', 'Jacques'}, {winedrinker.name for winedrinker in t2_barolo_drinkers})
+
+        bordeaux = Wine.objects.get(name='Bordeaux')
+        t2_bordeaux_drinkers = bordeaux.drinkers.as_of(self.t2).all()
+        self.assertEqual(set([]), {winedrinker.name for winedrinker in t2_bordeaux_drinkers})
+
+    def test_accessibility_of_versions_and_non_versionables_via_versioned_fk(self):
+        jacques_current = WineDrinker.objects.current.get(name='Jacques')
+        jacques_t1 = WineDrinker.objects.as_of(self.t1).get(name='Jacques')
+
+        # Testing direct access
+        # We're not able to track changes in objects that are not versionables, pointing objects that are versionables
+        # Therefore, it seems like Jacques always had the same combination of hats (even though at t1 and t2, he had
+        # one single hat)
+        self.assertEqual({'Vagabond', 'Sailor'}, {hat.shape for hat in jacques_current.hats.all()})
+        self.assertEqual({hat.shape for hat in jacques_t1.hats.all()},
+                         {hat.shape for hat in jacques_current.hats.all()})
+        # Fetch jackie-object; at that point, jackie still had her Sailor hat
+        jackie_t2 = WineDrinker.objects.as_of(self.t2).get(name='Jackie')
+        self.assertEqual(set([]), {hat.shape for hat in jackie_t2.hats.all()})
+
+        # Testing reverse access
+        green_vagabond_hat = WineDrinkerHat.objects.get(shape='Vagabond')
+        should_be_jacques = green_vagabond_hat.wearer
+        self.assertIsNotNone(should_be_jacques)
+        self.assertEqual('Jacques', should_be_jacques.name)
+        self.assertTrue(should_be_jacques.is_current)
+
+        red_sailor_hat = WineDrinkerHat.objects.get(shape='Sailor')
+        should_be_jacques = red_sailor_hat.wearer
+        self.assertIsNotNone(should_be_jacques)
+        self.assertEqual('Jacques', should_be_jacques.name)
+        self.assertTrue(should_be_jacques.is_current)
+
+        # For the records: navigate to a prior version of a versionable object ('Jacques') as follows
+        # TODO: Issue #33 on Github aims for a more direct syntax to get to another version of the same object
+        should_be_jacques_t1 = should_be_jacques.__class__.objects.as_of(self.t1).get(identity=should_be_jacques.identity)
+        self.assertEqual(jacques_t1, should_be_jacques_t1)
