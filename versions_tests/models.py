@@ -162,13 +162,6 @@ class Color(Versionable):
 
 ############################################
 # IntegrationNonVersionableModelsTests models
-class WineDrinker(Versionable):
-    name = CharField(max_length=200)
-    glass_content = ForeignKey('Wine', related_name='drinkers', null=True)
-
-    __str__ = versionable_description
-
-
 class Wine(Model):
     name = CharField(max_length=200)
     vintage = IntegerField()
@@ -177,6 +170,11 @@ class Wine(Model):
         return "<" + str(self.__class__.__name__) + " object: " + str(
             self.name) + " (" + str(self.vintage) + ")>"
 
+class WineDrinker(Versionable):
+    name = CharField(max_length=200)
+    glass_content = ForeignKey(Wine, related_name='drinkers', null=True)
+
+    __str__ = versionable_description
 
 class WineDrinkerHat(Model):
     shape_choices = [('Sailor', 'Sailor'),

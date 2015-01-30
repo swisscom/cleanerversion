@@ -558,6 +558,28 @@ For Django 1.6, it is possible to do something similar.  The functions in ``vers
 unchanged for Django 1.6.
 
 
+Integrating CleanerVersion versioned models with non-versioned models
+=====================================================================
+
+It is possible to combine both, versioned models (as described up to this point) and non-versioned models.
+
+In order to have your relationships work out correctly, make use of ``VersionedForeignKey`` as described in the
+following table.
+For example, one has to read the table as follows: \
+"If a model inheriting directly from Django's ``Model`` is pointing
+a model inheriting from ``Versionable``, then a ``VersionedForeignKey`` relation has to be used."
+
++--------------------------------------+--------------+-----------------------+
+| Model def. FK \\ Model pointed by FK | models.Model | Versionable           |
++======================================+==============+=======================+
+| **models.Model**                     | ForeignKey() | VersionedForeignKey() |
++--------------------------------------+--------------+-----------------------+
+| **Versionable**                      | ForeignKey() | VersionedForeignKey() |
++--------------------------------------+--------------+-----------------------+
+
+Note that M2M-relationships have not been extended yet to work in a heterogeneous use case as described here.
+
+
 Known Issues
 ============
 
