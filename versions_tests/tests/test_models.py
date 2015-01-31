@@ -412,6 +412,10 @@ class OneToManyTest(TestCase):
         # We didn't change anything to the players so there must be 2 players in
         # the team at time t1...
         team_at_t1 = Team.objects.as_of(t1).first()
+        # TODO: Remove the following (useless) line, once Django1.8 is working
+        t1_player_queryset = team_at_t1.player_set.all()
+        # TODO: [django18 compat] The SQL query in t1_player_queryset.query shows that the Team pk value (team_at_t1.id)
+        # is used to look up the players (instead of the identity property value (team_at_t1.identity))
         self.assertEqual(2, team_at_t1.player_set.count())
 
         # ... and at time t2
