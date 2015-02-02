@@ -309,7 +309,7 @@ class VersionedQuery(Query):
         (e.g. by adding a filter to the queryset) does not allow the caching of related
         object to work (they are attached to a queryset; filter() returns a new queryset).
         """
-        if self.querytime.active:
+        if self.querytime.active and (not hasattr(self, '_querytime_filter_added') or not self._querytime_filter_added):
             time = self.querytime.time
             if time is None:
                 self.add_q(Q(version_end_date__isnull=True))
@@ -318,6 +318,9 @@ class VersionedQuery(Query):
                     (Q(version_end_date__gt=time) | Q(version_end_date__isnull=True))
                     & Q(version_start_date__lte=time)
                 )
+            # Ensure applying these filters happens only a single time (even if it doesn't falsify the query, it's
+            # just not very comfortable to read)
+            self._querytime_filter_added = True
         return super(VersionedQuery, self).get_compiler(*args, **kwargs)
 
 
@@ -479,6 +482,30 @@ class VersionedForeignKey(ForeignKey):
         return where_class([VersionedExtraWhere(historic_sql=historic_sql, current_sql=current_sql, alias=alias,
                                                 remote_alias=remote_alias)])
 
+    def get_joining_columns(self, reverse_join=False):
+        """
+        Get and return joining columns defined by this foreign key relationship
+
+        :return: A tuple containing the column names of the tables to be joined (<local_col_name>, <remote_col_name>)
+        :rtype: tuple
+        """
+        source = self.reverse_related_fields if reverse_join else self.related_fields
+        joining_columns = tuple()
+        for lhs_field, rhs_field in source:
+            lhs_col_name = lhs_field.column
+            rhs_col_name = rhs_field.column
+            # Test whether
+            # - self is the current ForeignKey relationship
+            # - self was not auto_created (e.g. is not part of a M2M relationship)
+            if self is lhs_field and not self.auto_created:
+                if rhs_col_name == Versionable.VERSION_IDENTIFIER_FIELD:
+                    rhs_col_name = Versionable.OBJECT_IDENTIFIER_FIELD
+            elif self is rhs_field and not self.auto_created:
+                if lhs_col_name == Versionable.VERSION_IDENTIFIER_FIELD:
+                    lhs_col_name = Versionable.OBJECT_IDENTIFIER_FIELD
+            joining_columns = joining_columns + ((lhs_col_name, rhs_col_name),)
+        return joining_columns
+
 
 class VersionedManyToManyField(ManyToManyField):
     def __init__(self, *args, **kwargs):
@@ -557,8 +584,8 @@ class VersionedManyToManyField(ManyToManyField):
         return type(str(name), (Versionable,), {
             'Meta': meta,
             '__module__': cls.__module__,
-            from_: VersionedForeignKey(cls, related_name='%s+' % name),
-            to_field_name: VersionedForeignKey(to, related_name='%s+' % name),
+            from_: VersionedForeignKey(cls, related_name='%s+' % name, auto_created=name),
+            to_field_name: VersionedForeignKey(to, related_name='%s+' % name, auto_created=name),
         })
 
 
@@ -920,6 +947,9 @@ class Versionable(models.Model):
     """
     This is pretty much the central point for versioning objects.
     """
+
+    VERSION_IDENTIFIER_FIELD = 'id'
+    OBJECT_IDENTIFIER_FIELD = 'identity'
 
     id = models.CharField(max_length=36, primary_key=True)
     """id stands for ID and is the primary key; sometimes also referenced as the surrogate key"""
