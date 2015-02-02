@@ -59,7 +59,7 @@ class VersionManager(models.Manager):
         :return: VersionedQuerySet
         """
         qs = VersionedQuerySet(self.model, using=self._db)
-        if hasattr(self, 'instance'):
+        if hasattr(self, 'instance') and hasattr(self.instance, '_querytime'):
             qs.querytime = self.instance._querytime
         return qs
 
@@ -591,12 +591,15 @@ class VersionedReverseSingleRelatedObjectDescriptor(ReverseSingleRelatedObjectDe
         if not isinstance(current_elt, Versionable):
             raise TypeError("It seems like " + str(type(self)) + " is not a Versionable")
 
-        # If current_elt matches the instance's querytime, there's no need to make a database query.
-        if Versionable.matches_querytime(current_elt, instance._querytime):
-            current_elt._querytime = instance._querytime
-            return current_elt
+        if hasattr(instance, '_querytime'):
+            # If current_elt matches the instance's querytime, there's no need to make a database query.
+            if Versionable.matches_querytime(current_elt, instance._querytime):
+                current_elt._querytime = instance._querytime
+                return current_elt
 
-        return current_elt.__class__.objects.as_of(instance._querytime.time).get(identity=current_elt.identity)
+            return current_elt.__class__.objects.as_of(instance._querytime.time).get(identity=current_elt.identity)
+        else:
+            return current_elt.__class__.objects.current.get(identity=current_elt.identity)
 
 
 class VersionedForeignRelatedObjectsDescriptor(ForeignRelatedObjectsDescriptor):
@@ -623,7 +626,7 @@ class VersionedForeignRelatedObjectsDescriptor(ForeignRelatedObjectsDescriptor):
                 queryset = super(VersionedRelatedManager, self).get_queryset()
                 # Do not set the query time if it is already correctly set.  queryset.as_of() returns a clone
                 # of the queryset, and this will destroy the prefetched objects cache if it exists.
-                if self.instance._querytime.active and queryset.querytime != self.instance._querytime:
+                if isinstance(queryset, VersionedQuerySet) and self.instance._querytime.active and queryset.querytime != self.instance._querytime:
                     queryset = queryset.as_of(self.instance._querytime.time)
                 return queryset
 
@@ -687,8 +690,9 @@ def create_versioned_many_related_manager(superclass, rel):
             """
 
             queryset = super(VersionedManyRelatedManager, self).get_queryset()
-            if self.instance._querytime.active and self.instance._querytime != queryset.querytime:
-                queryset = queryset.as_of(self.instance._querytime.time)
+            if hasattr(queryset, 'querytime'):
+                if self.instance._querytime.active and self.instance._querytime != queryset.querytime:
+                    queryset = queryset.as_of(self.instance._querytime.time)
             return queryset
 
         def _remove_items(self, source_field_name, target_field_name, *objs):

@@ -1,4 +1,4 @@
-from django.db.models import CharField, IntegerField
+from django.db.models import CharField, IntegerField, Model, ForeignKey
 
 from versions.models import Versionable, VersionedManyToManyField, VersionedForeignKey
 
@@ -45,6 +45,7 @@ class Player(Versionable):
     team = VersionedForeignKey(Team, null=True)
 
     __str__ = versionable_description
+
 
 class Award(Versionable):
     name = CharField(max_length=200)
@@ -154,5 +155,38 @@ class ChainStore(Versionable):
     # Yea, well, they want to appeal to people who want to be different.
     VERSION_UNIQUE = [['subchain_id', 'city', 'name'], ['door_frame_color', 'door_color']]
 
+
 class Color(Versionable):
-   name = CharField(max_length=40)
+    name = CharField(max_length=40)
+
+
+############################################
+# IntegrationNonVersionableModelsTests models
+class Wine(Model):
+    name = CharField(max_length=200)
+    vintage = IntegerField()
+
+    def __str__(self):
+        return "<" + str(self.__class__.__name__) + " object: " + str(
+            self.name) + " (" + str(self.vintage) + ")>"
+
+class WineDrinker(Versionable):
+    name = CharField(max_length=200)
+    glass_content = ForeignKey(Wine, related_name='drinkers', null=True)
+
+    __str__ = versionable_description
+
+class WineDrinkerHat(Model):
+    shape_choices = [('Sailor', 'Sailor'),
+                     ('Cloche', 'Cloche'),
+                     ('Cartwheel', 'Cartwheel'),
+                     ('Turban', 'Turban'),
+                     ('Breton', 'Breton'),
+                     ('Vagabond', 'Vagabond')]
+    color = CharField(max_length=40)
+    shape = CharField(max_length=200, choices=shape_choices, default='Sailor')
+    wearer = VersionedForeignKey(WineDrinker, related_name='hats', null=True)
+
+    def __str__(self):
+        return "<" + str(self.__class__.__name__) + " object: " + str(
+            self.shape) + " (" + str(self.color) + ")>"
