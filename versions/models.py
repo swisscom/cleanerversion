@@ -1001,7 +1001,7 @@ class Versionable(models.Model):
         """
         if self.version_end_date is None:
             self.version_end_date = timestamp
-            self.save(using=using)
+            self.save(force_update=True, using=using)
         else:
             raise Exception('Cannot delete anything else but the current version')
 
