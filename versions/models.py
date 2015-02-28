@@ -616,7 +616,7 @@ class VersionedReverseSingleRelatedObjectDescriptor(ReverseSingleRelatedObjectDe
             return None
 
         if not isinstance(current_elt, Versionable):
-            raise TypeError("It seems like " + str(type(self)) + " is not a Versionable")
+            raise TypeError("VersionedForeignKey target is of type " + str(type(current_elt)) + ", which is not a subclass of Versionable")
 
         if hasattr(instance, '_querytime'):
             # If current_elt matches the instance's querytime, there's no need to make a database query.
