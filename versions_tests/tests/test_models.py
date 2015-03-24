@@ -26,8 +26,10 @@ from django.utils.timezone import utc
 from django.utils import six
 
 from versions.models import Versionable, get_utc_now
-from versions_tests.models import (Professor, Classroom, Student, Pupil, Teacher, Observer, B, Subject, Team, Player,
-                                   Award, City, Directory, C1, C2, C3, Wine, WineDrinker, WineDrinkerHat)
+from versions_tests.models import (
+    Award, B, C1, C2, C3, City, Classroom, Directory, Observer, Person, Player, Professor, Pupil,
+    Student, Subject, Teacher, Team, Wine, WineDrinker, WineDrinkerHat
+)
 
 
 def get_relation_table(model_class, fieldname):
@@ -1272,6 +1274,25 @@ class MultiM2MToSameTest(TestCase):
         erika_t3 = Pupil.objects.as_of(self.t3).get(name='Erika')
         self.assertEqual(erika_t3.science_teachers.count(), 1)
         self.assertEqual(erika_t3.science_teachers.first().name, 'Mr. Kazmirek')
+
+
+class SelfReferencingManyToManyTest(TestCase):
+    def setUp(self):
+        maude = Person.objects.create(name='Maude')
+        max = Person.objects.create(name='Max')
+        mips = Person.objects.create(name='Mips')
+        mips.parents.add(maude, max)
+
+    def test_parent_relationship(self):
+        mips = Person.objects.current.get(name='Mips')
+        parents = mips.parents.all()
+        self.assertSetEqual({'Maude', 'Max'}, set([p.name for p in parents]))
+
+    def test_child_relationship(self):
+        maude = Person.objects.current.get(name='Maude')
+        max = Person.objects.current.get(name='Max')
+        for person in [maude, max]:
+            self.assertEqual('Mips', person.children.first().name)
 
 
 class ManyToManyFilteringTest(TestCase):

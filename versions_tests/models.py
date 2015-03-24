@@ -190,3 +190,10 @@ class WineDrinkerHat(Model):
     def __str__(self):
         return "<" + str(self.__class__.__name__) + " object: " + str(
             self.shape) + " (" + str(self.color) + ")>"
+
+
+############################################
+# SelfReferencingManyToManyTest models
+class Person(Versionable):
+    name = CharField(max_length=200)
+    children = VersionedManyToManyField('self', symmetrical=False, null=True, related_name='parents')
