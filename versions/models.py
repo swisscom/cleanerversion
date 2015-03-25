@@ -27,7 +27,7 @@ from django.db.models.fields import FieldDoesNotExist
 from django.db.models.fields.related import (ForeignKey, ReverseSingleRelatedObjectDescriptor,
                                              ReverseManyRelatedObjectsDescriptor, ManyToManyField,
                                              ManyRelatedObjectsDescriptor, create_many_related_manager,
-                                             ForeignRelatedObjectsDescriptor)
+                                             ForeignRelatedObjectsDescriptor, RECURSIVE_RELATIONSHIP_CONSTANT)
 from django.db.models.query import QuerySet, ValuesListQuerySet, ValuesQuerySet
 from django.db.models.signals import post_init
 from django.db.models.sql import Query
@@ -550,18 +550,22 @@ class VersionedManyToManyField(ManyToManyField):
     def create_versioned_many_to_many_intermediary_model(field, cls, field_name):
         # Let's not care too much on what flags could potentially be set on that intermediary class (e.g. managed, etc)
         # Let's play the game, as if the programmer had specified a class within his models... Here's how.
-        # TODO: Test references to 'self'
 
         from_ = cls._meta.model_name
-        to = field.rel.to
+        to_model = field.rel.to
 
         # Force 'to' to be a string (and leave the hard work to Django)
         if not isinstance(field.rel.to, six.string_types):
-            to = '%s.%s' % (field.rel.to._meta.app_label, field.rel.to._meta.object_name)
-            to_field_name = field.rel.to._meta.object_name.lower()
+            to_model = '%s.%s' % (field.rel.to._meta.app_label, field.rel.to._meta.object_name)
+            to = field.rel.to._meta.object_name.lower()
         else:
-            to_field_name = to.lower()
+            to = to_model.lower()
         name = '%s_%s' % (from_, field_name)
+
+        if field.rel.to == RECURSIVE_RELATIONSHIP_CONSTANT or to == cls._meta.object_name:
+            from_ = 'from_%s' % to
+            to = 'to_%s' % to
+            to_model = cls
 
         # Since Django 1.7, a migration mechanism is shipped by default with Django. This migration module loads all
         # declared apps' models inside a __fake__ module.
@@ -585,7 +589,7 @@ class VersionedManyToManyField(ManyToManyField):
             'Meta': meta,
             '__module__': cls.__module__,
             from_: VersionedForeignKey(cls, related_name='%s+' % name, auto_created=name),
-            to_field_name: VersionedForeignKey(to, related_name='%s+' % name, auto_created=name),
+            to: VersionedForeignKey(to_model, related_name='%s+' % name, auto_created=name),
         })
 
 
