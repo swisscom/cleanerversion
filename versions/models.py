@@ -180,6 +180,9 @@ class VersionManager(models.Manager):
         :param mixed as_of: valid values are the strings 'start' or 'end', or a datetime object.
         :return: Versionable
         """
+        if not version:
+            return version
+
         if as_of == 'end':
             if version.is_current:
                 # Ensure that version._querytime is active, in case it wasn't before.
