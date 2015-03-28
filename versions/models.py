@@ -71,7 +71,7 @@ class VersionManager(models.Manager):
         """
         return self.get_queryset().as_of(time)
 
-    def next_version(self, object):
+    def next_version(self, object, as_of='end'):
         """
         Return the next version of the given object.
 
@@ -82,11 +82,16 @@ class VersionManager(models.Manager):
         see if there is a newer version (perhaps created by some other code), it simply
         returns the passed object.
 
-        :param object: Versionable
+        ``as_of`` is used to fix the point in time for the version; this affects which related
+        objects are returned when querying for object relations. See ``VersionManager.version_as_of``
+        for details on valid ``as_of`` values.
+
+        :param Versionable object: object whose next version will be returned.
+        :param mixed as_of: modifies returned version's as_of attribute. 'start'|'end'|datetime|None
         :return: Versionable
         """
         if object.version_end_date == None:
-            return object
+            next = object
         else:
             try:
                 next = self.get(
@@ -99,20 +104,26 @@ class VersionManager(models.Manager):
             except ObjectDoesNotExist as e:
                 raise ObjectDoesNotExist(
                     "next_version couldn't find a next version of object " + str(object.identity) + "\n" + str(e))
-            return next
 
-    def previous_version(self, object):
+        return self.adjust_version_as_of(next, as_of)
+
+    def previous_version(self, object, as_of='end'):
         """
         Return the previous version of the given object.
 
         In case there is no previous object existing, meaning the given object
         is the first version of the object, then the function returns this version.
 
-        :param object: Versionable
+        ``as_of`` is used to fix the point in time for the version; this affects which related
+        objects are returned when querying for object relations. See ``VersionManager.version_as_of``
+        for details on valid ``as_of`` values.
+
+        :param Versionable object: object whose previous version will be returned.
+        :param mixed as_of: modifies returned version's as_of attribute. 'start'|'end'|datetime|None
         :return: Versionable
         """
         if object.version_birth_date == object.version_start_date:
-            return object
+            previous = object
         else:
             try:
                 previous = self.get(
@@ -128,11 +139,12 @@ class VersionManager(models.Manager):
                 raise ObjectDoesNotExist(
                     "previous_version couldn't find a previous version of object " + str(object.identity) + "\n" + str(
                         e))
-            return previous
 
-    def current_version(self, object):
+        return self.adjust_version_as_of(previous, as_of)
+
+    def current_version(self, object, as_of=None):
         """
-        Return the previous version of the given object.
+        Return the current version of the given object.
 
         The current version is the one having its version_end_date set to NULL.
         If there is not such a version then it means the object has been 'deleted'
@@ -142,13 +154,63 @@ class VersionManager(models.Manager):
         see if there is a newer version (perhaps created by some other code), it simply
         returns the passed object.
 
-        :param object: Versionable
+        :param Versionable object: object whose current version will be returned.
         :return: Versionable
         """
         if object.version_end_date is None:
-            return object
+            current = object
+        else:
+            current = self.current.filter(identity=object.identity).first()
 
-        return self.current.filter(identity=object.identity).first()
+        return self.adjust_version_as_of(current, as_of)
+
+    def adjust_version_as_of(self, version, as_of):
+        """
+        Adjusts the passed version's as_of time to an appropriate value, and returns it.
+
+        ``as_of`` is used to fix the point in time for the version; this affects which related
+        objects are returned when querying for object relations.
+        Valid ``as_of`` values and how this affects the returned version's as_of attribute:
+        - 'start': version start date
+        - 'end': version end date - 1 microsecond (no effect if version is current version)
+        - datetime object: given datetime (raises ValueError if given datetime not valid for version)
+        - None: unset (related object queries will not be restricted to a point in time)
+
+        :param Versionable object: object whose as_of will be adjusted as requested.
+        :param mixed as_of: valid values are the strings 'start' or 'end', or a datetime object.
+        :return: Versionable
+        """
+        if as_of == 'end':
+            if version.is_current:
+                # Ensure that version._querytime is active, in case it wasn't before.
+                version.as_of = None
+            else:
+                version.as_of = version.version_end_date - datetime.timedelta(microseconds=1)
+        elif as_of == 'start':
+            version.as_of = version.version_start_date
+        elif isinstance(as_of, datetime.datetime):
+            as_of = as_of.astimezone(utc)
+            if not as_of >= version.version_start_date:
+                raise ValueError(
+                    "Provided as_of '{}' is earlier than version's start time '{}'".format(
+                        as_of.isoformat(),
+                        version.version_start_date.isoformat()
+                    )
+                )
+            if version.version_end_date is not None and as_of >= version.version_end_date:
+                raise ValueError(
+                    "Provided as_of '{}' is later than version's start time '{}'".format(
+                        as_of.isoformat(),
+                        version.version_end_date.isoformat()
+                    )
+                )
+            version.as_of = as_of
+        elif as_of is None:
+            version._querytime = QueryTime(time=None, active=False)
+        else:
+            raise TypeError("as_of parameter must be 'start', 'end', None, or datetime object")
+
+        return version
 
     @property
     def current(self):
