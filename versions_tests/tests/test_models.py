@@ -365,7 +365,7 @@ class VersionNavigationAsOfTest(TestCase):
         self.assertFalse(city1_t2.is_current)
 
         # as_of 'end' for current version means "current", not a certain point in time
-        city1_current = City.objects.next_version(city1_t2, as_of='end')
+        city1_current = City.objects.next_version(city1_t2, relations_as_of='end')
         self.assertTrue(city1_current.is_current)
         self.assertIsNone(city1_current._querytime.time)
         teams = city1_current.team_set.all()
@@ -373,18 +373,18 @@ class VersionNavigationAsOfTest(TestCase):
         self.assertEqual('team1.b', teams[0].name)
 
         # as_of 'end' for non-current version means at a certain point in time
-        city1_previous = City.objects.previous_version(city1_current, as_of='end')
+        city1_previous = City.objects.previous_version(city1_current, relations_as_of='end')
         self.assertIsNotNone(city1_previous._querytime.time)
 
         # as_of 'start': returns version at the very start of it's life.
-        city1_latest_at_birth = City.objects.next_version(city1_t2, as_of='start')
+        city1_latest_at_birth = City.objects.next_version(city1_t2, relations_as_of='start')
         self.assertTrue(city1_latest_at_birth.is_current)
         self.assertEqual(1, city1_latest_at_birth.team_set.count())
         self.assertIsNotNone(city1_latest_at_birth._querytime.time)
         self.assertEqual(city1_latest_at_birth._querytime.time, city1_latest_at_birth.version_start_date)
 
         # as_of datetime: returns a version at a given point in time.
-        city1_t4 = City.objects.next_version(city1_t2, as_of=self.t4)
+        city1_t4 = City.objects.next_version(city1_t2, relations_as_of=self.t4)
         self.assertTrue(city1_latest_at_birth.is_current)
         self.assertIsNotNone(city1_latest_at_birth._querytime.time)
         teams = city1_latest_at_birth.team_set.all()
@@ -394,7 +394,7 @@ class VersionNavigationAsOfTest(TestCase):
         # as_of None: returns object without time restriction for related objects.
         # This means, that all other related object versions that have been associated with
         # this object are returned when queried, without applying any time restriction.
-        city1_v2 = City.objects.current_version(city1_t2, as_of=None)
+        city1_v2 = City.objects.current_version(city1_t2, relations_as_of=None)
         self.assertFalse(city1_v2._querytime.active)
         teams = city1_v2.team_set.all()
         team_names = {team.name for team in teams}
@@ -405,15 +405,15 @@ class VersionNavigationAsOfTest(TestCase):
         city = City.objects.current.get(name__startswith='city1')
 
         with self.assertRaises(TypeError):
-            City.objects.previous_version(city, as_of='endlich')
+            City.objects.previous_version(city, relations_as_of='endlich')
 
         # Using an as_of time before the object's validity period:
         with self.assertRaises(ValueError):
-            City.objects.current_version(city, as_of=self.t1)
+            City.objects.current_version(city, relations_as_of=self.t1)
 
         # Using an as_of time after the object's validity period:
         with self.assertRaises(ValueError):
-            City.objects.previous_version(city, as_of=self.t5)
+            City.objects.previous_version(city, relations_as_of=self.t5)
 
 
 class HistoricObjectsHandling(TestCase):
