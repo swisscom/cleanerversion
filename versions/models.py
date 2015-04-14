@@ -169,7 +169,8 @@ class VersionManager(models.Manager):
 
         return self.adjust_version_as_of(current, relations_as_of)
 
-    def adjust_version_as_of(self, version, relations_as_of):
+    @staticmethod
+    def adjust_version_as_of(version, relations_as_of):
         """
         Adjusts the passed version's as_of time to an appropriate value, and returns it.
 
