@@ -274,51 +274,6 @@ class VersionNavigationTest(TestCase):
 
         self.assertRaises(ObjectDoesNotExist, lambda: B.objects.next_version(v3))
 
-    def test_getting_two_next_versions(self):
-        """
-        This should never happen, unless something went wrong REALLY bad;
-        For setting up this test case, we have to go under the hood of CleanerVersion and modify some timestamps.
-        Only like this it is possible to have two versions that follow one first version.
-        """
-        v1 = B.objects.as_of(self.t1).first()
-        v2 = B.objects.as_of(self.t2).first()
-        v3 = B.objects.as_of(self.t3).first()
-
-        v3.version_start_date = v2.version_start_date
-        v3.save()
-
-        self.assertRaises(MultipleObjectsReturned, lambda: B.objects.next_version(v1))
-
-    def test_getting_nonexistent_previous_version(self):
-        """
-        Raise an error when trying to look up the previous version of a version floating in emptyness.
-        This test case implies BAD modification under the hood of CleanerVersion, interrupting the continuity of an
-        object's versions through time.
-        """
-        v1 = B.objects.as_of(self.t1).first()
-        v2 = B.objects.as_of(self.t2).first()
-        v3 = B.objects.as_of(self.t3).first()
-
-        v2.version_end_date = v1.version_end_date
-        v2.save()
-
-        self.assertRaises(ObjectDoesNotExist, lambda: B.objects.previous_version(v3))
-
-    def test_getting_two_previous_versions(self):
-        """
-        This should never happen, unless something went wrong REALLY bad;
-        For setting up this test case, we have to go under the hood of CleanerVersion and modify some timestamps.
-        Only like this it is possible to have two versions that precede one last version.
-        """
-        v1 = B.objects.as_of(self.t1).first()
-        v2 = B.objects.as_of(self.t2).first()
-        v3 = B.objects.as_of(self.t3).first()
-
-        v1.version_end_date = v2.version_end_date
-        v1.save()
-
-        self.assertRaises(MultipleObjectsReturned, lambda: B.objects.previous_version(v3))
-
 
 class HistoricObjectsHandling(TestCase):
     t0 = datetime.datetime(1980, 1, 1, tzinfo=utc)
