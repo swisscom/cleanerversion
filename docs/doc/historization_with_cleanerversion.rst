@@ -558,8 +558,13 @@ If there are multiple sets of columns that should be unique, use something like 
 
     VERSION_UNIQUE = [['field1', 'field2'], ['field3', 'field4']]
 
-For an example of how to transparently create the database indexes for these VERSION_UNIQUE definitions in a Django app, as well
-as removing the extra like indexes created on the CharField columns, see:
+As an extra method of protection against bad data appearing, it is good to ensure that only one version of an object
+is current at the same time.  This can be done by adding a partially unique index for the ``identity`` column.
+You can use ``versions.util.postgresql.create_current_version_unique_identity_indexes()`` for this.
+
+For an example of how to transparently create the database indexes for these VERSION_UNIQUE definitions in a Django
+app, removing the extra like indexes created on the CharField columns, and enforcing that only one version is current
+at the same time, see:
 
 * https://github.com/swisscom/cleanerversion/blob/master/versions_tests/__init__.py
 * https://github.com/swisscom/cleanerversion/blob/master/versions_tests/apps.py
