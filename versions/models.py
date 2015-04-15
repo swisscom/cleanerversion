@@ -93,17 +93,15 @@ class VersionManager(models.Manager):
         if object.version_end_date == None:
             return object
         else:
-            try:
-                next = self.get(
-                    Q(identity=object.identity),
-                    Q(version_start_date=object.version_end_date))
-            except MultipleObjectsReturned as e:
-                raise MultipleObjectsReturned(
-                    "next_version couldn't uniquely identify the next version of object " + str(
-                        object.identity) + " to be returned\n" + str(e))
-            except ObjectDoesNotExist as e:
+            next = self.filter(
+                Q(identity=object.identity),
+                Q(version_start_date__gte=object.version_end_date)
+            ).order_by('version_start_date').first()
+
+            if not next:
                 raise ObjectDoesNotExist(
-                    "next_version couldn't find a next version of object " + str(object.identity) + "\n" + str(e))
+                    "next_version couldn't find a next version of object " + str(object.identity))
+
             return next
 
     def previous_version(self, object):
@@ -119,20 +117,15 @@ class VersionManager(models.Manager):
         if object.version_birth_date == object.version_start_date:
             return object
         else:
-            try:
-                previous = self.get(
-                    Q(identity=object.identity),
-                    Q(version_end_date=object.version_start_date))
-            except MultipleObjectsReturned as e:
-                raise MultipleObjectsReturned(
-                    "previous_version couldn't uniquely identify the previous version of object " + str(
-                        object.identity) + " to be returned\n" + str(e))
-            # This should never-ever happen, since going prior a first version of an object should be avoided by the
-            # first test of this method
-            except ObjectDoesNotExist as e:
+            previous = self.filter(
+                Q(identity=object.identity),
+                Q(version_end_date__lte=object.version_start_date)
+            ).order_by('-version_end_date').first()
+
+            if not previous:
                 raise ObjectDoesNotExist(
-                    "previous_version couldn't find a previous version of object " + str(object.identity) + "\n" + str(
-                        e))
+                    "previous_version couldn't find a previous version of object " + str(object.identity))
+
             return previous
 
     def current_version(self, object):
@@ -1044,22 +1037,35 @@ class Versionable(models.Model):
         return self.version_end_date is None
 
     @property
+    def is_latest(self):
+        """
+        Checks if this is the latest version.
+
+        Note that this will not check the database for a possible newer version.
+        It simply inspects the object's in-memory state.
+
+        :return: boolean
+        """
+        return self.id == self.identity
+
+    @property
+    def is_terminated(self):
+        """
+        Checks if this version has been terminated.
+
+        This will be true if a newer version has been created, or if the version has been "deleted".
+
+        :return: boolean
+        """
+        return self.version_end_date is not None
+
+    @property
     def as_of(self):
         return self._querytime.time
 
     @as_of.setter
     def as_of(self, time):
         self._querytime = QueryTime(time=time, active=True)
-
-    def _clone_at(self, timestamp):
-        """
-        WARNING: This method is only for internal use, it should not be used
-        from outside.
-
-        This function is mostly intended for testing, to allow creating
-        realistic test cases.
-        """
-        return self.clone(forced_version_date=timestamp)
 
     def clone(self, forced_version_date=None, in_bulk=False):
         """
@@ -1072,29 +1078,73 @@ class Versionable(models.Model):
         usually set only internally for performance optimization
         :return: returns a fresh clone of the original object (with adjusted relations)
         """
+        return self._clone(
+            old_version_end_date=forced_version_date, new_version_start_date=forced_version_date, in_bulk=in_bulk)
+
+    def _clone_at(self, timestamp):
+        """
+        WARNING: This method is only for internal use, it should not be used
+        from outside.
+
+        This function is mostly intended for testing, to allow creating
+        realistic test cases.
+        """
+        return self._clone(old_version_end_date=timestamp, new_version_start_date=timestamp)
+
+    def _clone(self, old_version_end_date=None, new_version_start_date=None, in_bulk=False, allow_restore=False):
+        """
+        Clones a Versionable and returns a fresh copy of the original object.
+        Original source: ClonableMixin snippet (http://djangosnippets.org/snippets/1271), with the pk/id change
+        suggested in the comments
+
+        :param forced_version_date: a timestamp including tzinfo; this value is usually set only internally!
+        :param in_bulk: whether not to write this objects to the database already, if not necessary; this value is
+        usually set only internally for performance optimization
+        :param allow_restore: if True, will allow cloning a deleted object.
+        :return: returns a fresh clone of the original object (with adjusted relations)
+        """
         if not self.pk:
             raise ValueError('Instance must be saved before it can be cloned')
 
-        if self.version_end_date:
-            raise ValueError('This is a historical item and can not be cloned.')
+        if self.version_end_date and not allow_restore:
+            raise ValueError('This is a historical item and can not be cloned.  Use restore() '
+                             'if you want to make it the current version')
 
-        if forced_version_date:
-            if not self.version_start_date <= forced_version_date <= get_utc_now():
+        now = get_utc_now()
+        if old_version_end_date:
+            if not self.version_start_date <= old_version_end_date <= now:
                 raise ValueError('The clone date must be between the version start date and now.')
         else:
-            forced_version_date = get_utc_now()
+            old_version_end_date = now
+
+        if new_version_start_date:
+            # if allow_restore and not self.is_current:
+            #     qs = self.__class__.objects.filter(identity=self.identity, version_end_date__isnull=False)
+            #     latest_end_date = qs.aggregate(Max('version_end_date'))['version_end_date']
+            # else:
+            #     latest_end_date = now
+            #
+            # if not new_version_start_date >= latest_end_date:
+            #     raise ValueError('It is not possible to use this new_version_start_date because a version '
+            #                      'already existed at that time')
+
+            if new_version_start_date < old_version_end_date:
+                raise ValueError('It is not possible to clone a version using a start time that is earlier '
+                                 'than the end time of the existing version')
+        else:
+            new_version_start_date = old_version_end_date
 
         earlier_version = self
 
         later_version = copy.copy(earlier_version)
         later_version.version_end_date = None
-        later_version.version_start_date = forced_version_date
+        later_version.version_start_date = new_version_start_date
 
         # set earlier_version's ID to a new UUID so the clone (later_version) can
         # get the old one -- this allows 'head' to always have the original
         # id allowing us to get at all historic foreign key relationships
         earlier_version.id = six.u(str(uuid.uuid4()))
-        earlier_version.version_end_date = forced_version_date
+        earlier_version.version_end_date = old_version_end_date
 
         if not in_bulk:
             # This condition might save us a lot of database queries if we are being called
@@ -1135,7 +1185,7 @@ class Versionable(models.Model):
         self.version_birth_date = self.version_start_date = timestamp
         return self
 
-    def clone_relations(self, clone, manager_field_name, forced_version_date):
+    def clone_relations(self, clone, manager_field_name, old_version_end_date, new_version_start_date):
         # Source: the original object, where relations are currently pointing to
         source = getattr(self, manager_field_name)  # returns a VersionedRelatedManager instance
         # Destination: the clone, where the cloned relations should point to
@@ -1152,7 +1202,11 @@ class Versionable(models.Model):
             # Only clone the relationship, if it is the current one; Simply adjust the older ones to point the old entry
             # Otherwise, the number of pointers pointing an entry will grow exponentially
             if rel.is_current:
-                later_current.append(rel.clone(forced_version_date=self.version_end_date, in_bulk=True))
+                later_current.append(rel._clone(
+                    old_version_end_date=old_version_end_date,
+                    new_version_start_date=new_version_start_date,
+                    in_bulk=True)
+                )
                 # On rel, which is no more 'current', set the source ID to self.id
                 setattr(rel, source.source_field_name, self)
             else:
@@ -1160,7 +1214,7 @@ class Versionable(models.Model):
         # Perform the bulk changes rel.clone() did not perform because of the in_bulk parameter
         # This saves a huge bunch of SQL queries:
         # - update current version entries
-        source.through.objects.filter(id__in=[l.id for l in later_current]).update(**{'version_start_date': forced_version_date})
+        source.through.objects.filter(id__in=[l.id for l in later_current]).update(**{'version_start_date': new_version_start_date})
         # - update entries that have been pointing the current object, but have never been 'current'
         source.through.objects.filter(id__in=[l.id for l in later_non_current]).update(**{source.source_field_name: self})
         # - create entries that were 'current', but which have been relieved in this method run
