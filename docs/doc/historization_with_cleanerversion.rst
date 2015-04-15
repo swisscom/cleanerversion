@@ -522,6 +522,19 @@ enforces that name and phone_number are unique together when the version_end_dat
 a similar capability.  A helper method for creating these partially unique indexes is provided for Postgresql, see
 the `Postgresql specific`_ section for more detail.
 
+Specifying the id of an object at creation time
+===============================================
+It is possible to specify an id when creating a new object, instead of letting CleanerVersion do this for you.  The
+id must be a unicode string representing a
+`version 4 UUID <http://en.wikipedia.org/wiki/Universally_unique_identifier#Version_4_.28random.29>`_.
+
+**Be careful if you do this!**.  The possibility of collisions can increase greatly if not all sources that specify
+a UUID use sufficient entropy. See
+`this <http://en.wikipedia.org/wiki/Universally_unique_identifier#Random_UUID_probability_of_duplicates>`_ for more
+details.
+
+The database-level unique constraint on the id will prohibit a duplicate uuid from being inserted, but your application
+will need to be ready to handle that.
 
 Postgresql specific
 ===================

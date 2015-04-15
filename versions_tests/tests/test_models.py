@@ -17,6 +17,7 @@ from time import sleep
 import itertools
 from unittest import skip, skipUnless
 import re
+import uuid
 
 from django.core.exceptions import SuspiciousOperation, ObjectDoesNotExist, MultipleObjectsReturned, ValidationError
 from django.db import connection
@@ -1939,3 +1940,39 @@ class FilterOnForeignKeyRelationTest(TestCase):
         team.clone()
         l2 = len(Player.objects.as_of(t1).filter(team__name='team'))
         self.assertEqual(l1, l2)
+
+class SpecifiedUUIDTest(TestCase):
+
+    @staticmethod
+    def uuid4():
+        return six.text_type(str(uuid.uuid4()))
+
+    def test_create_with_uuid(self):
+        p_id = self.uuid4()
+        p = Person.objects.create(id=p_id, name="Alice")
+        self.assertEqual(p_id, p.id)
+        self.assertEqual(p_id, p.identity)
+
+        p_id = six.text_type(str(uuid.uuid5(uuid.NAMESPACE_OID, 'bar')))
+        with self.assertRaises(ValueError):
+            Person.objects.create(id=p_id, name="Alexis")
+
+    def test_create_with_forced_identity(self):
+
+        # This test does some artificial manipulation of versioned objects, do not use it as an example
+        # for real-life usage!
+
+        p = Person.objects.create(name="Abela")
+
+        p.version_end_date=get_utc_now()
+        p.id = self.uuid4()
+        p.save()
+
+        p2 = Person.objects.create(forced_identity=p.identity, name="Alexis")
+        p2.version_birth_date = p.version_birth_date
+        p2.save()
+        self.assertEqual(p.identity, p2.identity)
+        self.assertNotEqual(p2.id, p2.identity)
+
+        # Thanks to all of that artificial manipulation, p is now the previous version of p2:
+        self.assertEqual(p.name, Person.objects.previous_version(p2).name)
