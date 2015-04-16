@@ -19,6 +19,7 @@ from unittest import skip, skipUnless
 import re
 import uuid
 
+from django import get_version
 from django.core.exceptions import SuspiciousOperation, ObjectDoesNotExist, ValidationError
 from django.db import connection, IntegrityError, transaction
 from django.db.models import Q, Count, Sum
@@ -1996,7 +1997,7 @@ class SpecifiedUUIDTest(TestCase):
 
         # Postgresql will provide protection here, since util.postgresql.create_current_version_unique_identity_indexes
         # has been invoked in the post migration handler.
-        if connection.vendor == 'postgresql':
+        if connection.vendor == 'postgresql' and get_version() >= '1.7':
             with self.assertRaises(IntegrityError):
                 with transaction.atomic():
                     Person.objects.create(forced_identity=p.identity, name="Alexis")
