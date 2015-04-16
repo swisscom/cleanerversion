@@ -19,8 +19,8 @@ from unittest import skip, skipUnless
 import re
 import uuid
 
-from django.core.exceptions import SuspiciousOperation, ObjectDoesNotExist, MultipleObjectsReturned, ValidationError
-from django.db import connection
+from django.core.exceptions import SuspiciousOperation, ObjectDoesNotExist, ValidationError
+from django.db import connection, IntegrityError, transaction
 from django.db.models import Q, Count, Sum
 from django.db.models.deletion import ProtectedError
 from django.test import TestCase
@@ -1994,9 +1994,15 @@ class SpecifiedUUIDTest(TestCase):
 
         p = Person.objects.create(name="Abela")
 
-        p.version_end_date=get_utc_now()
-        p.id = self.uuid4()
-        p.save()
+        # Postgresql will provide protection here, since util.postgresql.create_current_version_unique_identity_indexes
+        # has been invoked in the post migration handler.
+        if connection.vendor == 'postgresql':
+            with self.assertRaises(IntegrityError):
+                with transaction.atomic():
+                    Person.objects.create(forced_identity=p.identity, name="Alexis")
+
+        p.delete()
+        sleep(0.1)  # The start date of p2 does not necessarily have to equal the end date of p.
 
         p2 = Person.objects.create(forced_identity=p.identity, name="Alexis")
         p2.version_birth_date = p.version_birth_date
@@ -2004,5 +2010,5 @@ class SpecifiedUUIDTest(TestCase):
         self.assertEqual(p.identity, p2.identity)
         self.assertNotEqual(p2.id, p2.identity)
 
-        # Thanks to all of that artificial manipulation, p is now the previous version of p2:
+        # Thanks to that artificial manipulation, p is now the previous version of p2:
         self.assertEqual(p.name, Person.objects.previous_version(p2).name)
