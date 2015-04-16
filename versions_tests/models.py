@@ -1,4 +1,5 @@
 from django.db.models import CharField, IntegerField, Model, ForeignKey
+from django.db.models.deletion import DO_NOTHING, PROTECT, SET, SET_NULL
 
 from versions.models import Versionable, VersionedManyToManyField, VersionedForeignKey
 
@@ -27,6 +28,7 @@ class B(Versionable):
 # Models for
 # - OneToManyTest
 # - PrefetchingTest
+# - DeletionHandlerTest
 class City(Versionable):
     name = CharField(max_length=200)
 
@@ -50,6 +52,38 @@ class Player(Versionable):
 class Award(Versionable):
     name = CharField(max_length=200)
     players = VersionedManyToManyField(Player, related_name='awards')
+
+
+class Mascot(Versionable):
+    name = CharField(max_length=200)
+    team = VersionedForeignKey(Team, null=False)
+
+    __str__ = versionable_description
+
+
+def default_team():
+    return Team.objects.current.get(name__startswith='default_team.')
+
+
+class Fan(Versionable):
+    name = CharField(max_length=200)
+    team = VersionedForeignKey(Team, null=False, on_delete=SET(default_team))
+
+    __str__ = versionable_description
+
+
+class RabidFan(Versionable):
+    name = CharField(max_length=200)
+    team = VersionedForeignKey(Team, null=True, on_delete=SET_NULL)
+
+    __str__ = versionable_description
+
+
+class WizardFan(Versionable):
+    name = CharField(max_length=200)
+    team = VersionedForeignKey(Team, null=True, on_delete=PROTECT)
+
+    __str__ = versionable_description
 
 
 ############################################

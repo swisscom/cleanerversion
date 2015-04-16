@@ -39,6 +39,8 @@ from django.utils import six
 
 from django.db import models, router
 
+from versions.deletion import VersionedCollector
+
 
 def get_utc_now():
     return datetime.datetime.utcnow().replace(tzinfo=utc)
@@ -1013,7 +1015,13 @@ class Versionable(models.Model):
         self._querytime = QueryTime(time=None, active=False)
 
     def delete(self, using=None):
-        self._delete_at(get_utc_now(), using)
+        using = using or router.db_for_write(self.__class__, instance=self)
+        assert self._get_pk_val() is not None, "%s object can't be deleted because its %s attribute is set to None." % (self._meta.object_name, self._meta.pk.attname)
+
+        now = get_utc_now()
+        collector = VersionedCollector(using=using)
+        collector.collect([self])
+        collector.delete(now)
 
     def _delete_at(self, timestamp, using=None):
         """

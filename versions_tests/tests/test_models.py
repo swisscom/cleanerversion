@@ -22,14 +22,15 @@ import uuid
 from django.core.exceptions import SuspiciousOperation, ObjectDoesNotExist, MultipleObjectsReturned, ValidationError
 from django.db import connection
 from django.db.models import Q, Count, Sum
+from django.db.models.deletion import ProtectedError
 from django.test import TestCase
 from django.utils.timezone import utc
 from django.utils import six
 
 from versions.models import Versionable, get_utc_now
 from versions_tests.models import (
-    Award, B, C1, C2, C3, City, Classroom, Directory, Observer, Person, Player, Professor, Pupil,
-    Student, Subject, Teacher, Team, Wine, WineDrinker, WineDrinkerHat
+    Award, B, C1, C2, C3, City, Classroom, Directory, Fan, Mascot, Observer, Person, Player, Professor, Pupil,
+    RabidFan, Student, Subject, Teacher, Team, Wine, WineDrinker, WineDrinkerHat, WizardFan
 )
 
 
@@ -138,6 +139,72 @@ class DeletionTest(TestCase):
         previous = B.objects.previous_version(current)
 
         self.assertRaises(Exception, previous.delete)
+
+
+class DeletionHandlerTest(TestCase):
+    def setUp(self):
+        self.city = City.objects.create(name='c.v1')
+        self.team = Team.objects.create(name='t.v1', city=self.city)
+        self.default_team = Team.objects.create(name='default_team.v1')
+        self.p1 = Player.objects.create(name='p1.v1', team=self.team)
+        self.p2 = Player.objects.create(name='p2.v1', team=self.team)
+        self.m1 = Mascot.objects.create(name='m1.v1', team=self.team)
+        self.m2 = Mascot.objects.create(name='m2.v1', team=self.team)
+        self.f1 = Fan.objects.create(name='f1.v1', team=self.team)
+        self.f2 = Fan.objects.create(name='f2.v1', team=self.team)
+        self.f3 = Fan.objects.create(name='f3.v1', team=self.team)
+        self.rf1 = RabidFan.objects.create(name='rf1.v1', team=self.team)
+        self.a1 = Award.objects.create(name='a1.v1')
+        self.a1.players.add(self.p1, self.p2)
+
+    def test_on_delete(self):
+        t1 = get_utc_now()
+        player_filter = {'pk__in': [self.p1.pk, self.p2.pk]}
+        team_filter = {'pk__in': [self.team.pk]}
+        mascot_filter = {'pk__in': [self.m1.pk, self.m2.pk]}
+        fan_filter = {'pk__in': [self.f1.pk, self.f2.pk, self.f3.pk]}
+        rabid_fan_filter = {'pk__in': [self.rf1.pk]}
+        award_qs = Award.objects.current.filter(pk=self.a1.pk)[0]
+
+        self.assertEqual(1, Team.objects.current.filter(**team_filter).count())
+        self.assertEqual(2, Player.objects.current.filter(**player_filter).count())
+        self.assertEqual(2, award_qs.players.count())
+        self.assertEqual(2, Mascot.objects.current.filter(**mascot_filter).count())
+        self.assertEqual(3, Fan.objects.current.filter(**fan_filter).count())
+        self.assertEqual(1, RabidFan.objects.current.filter(**rabid_fan_filter).count())
+
+        self.city.delete()
+
+        # Cascading deletes are the default behaviour.
+        self.assertEqual(0, Team.objects.current.filter(**team_filter).count())
+        self.assertEqual(0, Player.objects.current.filter(**player_filter).count())
+        self.assertEqual(0, Mascot.objects.current.filter(**mascot_filter).count())
+
+        # Many-to-Many relationships are terminated.
+        self.assertEqual(0, award_qs.players.count())
+        # But a record of them still exists.
+        self.assertEqual(2, Award.objects.as_of(t1).get(pk=self.a1.pk).players.count())
+
+        # The fans picked another team (on_delete=SET(default_team))
+        fans = Fan.objects.current.filter(**fan_filter).all()
+        self.assertEqual(3, fans.count())
+        fans_teams = {f.team for f in fans}
+        self.assertEqual({self.default_team}, fans_teams)
+
+        # The rabid fan doesn't go away if he loses his team, he's still rabid, he just
+        # doesn't have a team anymore. (on_delete=SET_NULL)
+        self.assertEqual(1, RabidFan.objects.current.filter(**rabid_fan_filter).count())
+        rabid_fan = RabidFan.objects.current.filter(**rabid_fan_filter)[0]
+        self.assertEqual(None, rabid_fan.team)
+        self.assertEqual(self.team.identity, RabidFan.objects.previous_version(rabid_fan).team_id)
+
+    def test_protected_delete(self):
+        WizardFan.objects.create(name="Gandalf", team=self.team)
+        # The wizard does his best to protect his team and it's city. (on_delete=PROTECTED)
+        with self.assertRaises(ProtectedError):
+            self.city.delete()
+        self.assertEqual(1, Team.objects.current.filter(pk=self.team.pk).count())
+        self.assertEqual(1, City.objects.current.filter(pk=self.city.pk).count())
 
 
 class CurrentVersionTest(TestCase):
