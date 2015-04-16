@@ -29,7 +29,7 @@ from django.utils import six
 
 from versions.models import Versionable, get_utc_now
 from versions_tests.models import (
-    Award, B, C1, C2, C3, City, Classroom, Directory, Fan, Mascot, Observer, Person, Player, Professor, Pupil,
+    Award, B, C1, C2, C3, City, Classroom, Directory, Fan, Mascot, NonFan, Observer, Person, Player, Professor, Pupil,
     RabidFan, Student, Subject, Teacher, Team, Wine, WineDrinker, WineDrinkerHat, WizardFan
 )
 
@@ -154,6 +154,7 @@ class DeletionHandlerTest(TestCase):
         self.f2 = Fan.objects.create(name='f2.v1', team=self.team)
         self.f3 = Fan.objects.create(name='f3.v1', team=self.team)
         self.rf1 = RabidFan.objects.create(name='rf1.v1', team=self.team)
+        self.nf1 = NonFan.objects.create(name='nf1.v1', team=self.team)
         self.a1 = Award.objects.create(name='a1.v1')
         self.a1.players.add(self.p1, self.p2)
 
@@ -164,6 +165,7 @@ class DeletionHandlerTest(TestCase):
         mascot_filter = {'pk__in': [self.m1.pk, self.m2.pk]}
         fan_filter = {'pk__in': [self.f1.pk, self.f2.pk, self.f3.pk]}
         rabid_fan_filter = {'pk__in': [self.rf1.pk]}
+        non_fan_filter = {'pk__in': [self.nf1.pk]}
         award_qs = Award.objects.current.filter(pk=self.a1.pk)[0]
 
         self.assertEqual(1, Team.objects.current.filter(**team_filter).count())
@@ -172,6 +174,7 @@ class DeletionHandlerTest(TestCase):
         self.assertEqual(2, Mascot.objects.current.filter(**mascot_filter).count())
         self.assertEqual(3, Fan.objects.current.filter(**fan_filter).count())
         self.assertEqual(1, RabidFan.objects.current.filter(**rabid_fan_filter).count())
+        self.assertEqual(1, NonFan.objects.current.filter(**non_fan_filter).count())
 
         self.city.delete()
 
@@ -197,6 +200,11 @@ class DeletionHandlerTest(TestCase):
         rabid_fan = RabidFan.objects.current.filter(**rabid_fan_filter)[0]
         self.assertEqual(None, rabid_fan.team)
         self.assertEqual(self.team.identity, RabidFan.objects.previous_version(rabid_fan).team_id)
+
+        # The non-fan isn't affected (on_delete=DO_NOTHING)
+        self.assertEqual(1, NonFan.objects.current.filter(**non_fan_filter).count())
+        # This leaves a reference to the deleted team ... hey, that's what DO_NOTHING means.
+        self.assertEqual(self.team.pk, NonFan.objects.current.filter(**non_fan_filter)[0].team_id)
 
     def test_protected_delete(self):
         WizardFan.objects.create(name="Gandalf", team=self.team)

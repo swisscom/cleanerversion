@@ -86,6 +86,13 @@ class WizardFan(Versionable):
     __str__ = versionable_description
 
 
+class NonFan(Versionable):
+    name = CharField(max_length=200)
+    team = VersionedForeignKey(Team, null=False, on_delete=DO_NOTHING)
+
+    __str__ = versionable_description
+
+
 ############################################
 # SelfOneToManyTest models
 class Directory(Versionable):
