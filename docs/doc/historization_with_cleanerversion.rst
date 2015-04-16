@@ -500,6 +500,41 @@ you will get your existing obj returned, not the newest version from the databas
     next = Items.objects.next_version(item1)
 
 
+Deleting objects
+================
+You can expect ``delete()`` to behave like you are accustomed to in Django, with these differences:
+
+Not actually deleted from the database
+--------------------------------------
+When you call ``delete()`` on a versioned object, it is not actually removed from the database.  Instead, it's
+``version_end_date`` is changed from None to a timestamp.
+
+The same is true for the VersionedManyToManyField entries associated with the object you call ``delete()`` on:
+they are terminated by setting a ``version_end_date``.
+
+on_delete handlers
+------------------
+`on_delete handlers <https://docs.djangoproject.com/en/stable/ref/models/fields/#django.db.models.ForeignKey.on_delete>`_
+behave like this:
+
+CASCADE
+~~~~~~~
+The deletion is cascaded.  In the CleanerVersion context, this means that the cascaded-to versions are terminated.
+
+SET, SET_NULL, SET_DEFAULT
+~~~~~~~~~~~~~~~~~~~~~~~~~~
+The cascaded-to objects are cloned before SET, SET_NULL, or SET_DEFAULT are applied.
+
+DO_NOTHING
+~~~~~~~~~~
+Does nothing, just like in standard Django.  This has the effect of leaving a current object with a reference to
+a deleted object.  However, if you ask the current object for it's relations, it will not return the deleted object,
+because the deleted object does not match the current object's query time restriction (e.g. only current objects).
+
+PROTECTED
+~~~~~~~~~
+Behaves just like in standard Django.
+
 Unique Indexes
 ==============
 To have unique indexes with versioned models takes a bit of care. The issue here is that multiple versions having the same
