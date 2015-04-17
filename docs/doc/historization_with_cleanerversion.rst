@@ -535,6 +535,42 @@ PROTECTED
 ~~~~~~~~~
 Behaves just like in standard Django.
 
+Restoring previous versions
+===========================
+Previous versions can be restored like this::
+
+    restored_version = old_version.restore()
+
+``restored_version`` will now be the current version. This creates a new version, the old version is left untouched.
+If any current version existed when this code ran, it was terminated before the restored version was created.
+
+Be aware that relations (VersionedForeignKey, ManyToManyField, reverse foreign keys, etc.) are not restored.  You will
+need to restore relations yourself if necessary.
+
+If the object being restored has a non-nullable VersionedForeignKey, you will need to supply a value (object instance
+or pk) for this field.  If you do not supply a value, a ``versions.ForeignKeyRequiresValueError`` will be raised.
+
+Values can also be provided for other, non-ForeignKey fields at restore time.
+
+Example:
+
+Models::
+
+    class Team(Versionable):
+        name = models.CharField(max_length=50)
+
+    class Mascot(Versionable):
+        name = models.CharField(max_length=50)
+        age = models.IntegerField()
+        team = VersionedForeignKey(Team, null=False)
+
+Code::
+
+    beaver = beaver_v1.restore(team=mascot_v1.team)
+
+    new_team_pk = Team.objects.current.get(name='Black Stripes').pk
+    tiger = tiger_v4.restore(team=new_team_pk, age=33)
+
 Unique Indexes
 ==============
 To have unique indexes with versioned models takes a bit of care. The issue here is that multiple versions having the same

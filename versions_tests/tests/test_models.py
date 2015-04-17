@@ -2108,3 +2108,49 @@ class VersionRestoreTest(TestCase):
         rerestored = mascot2_v1.restore(team=team.pk)
         self.assertEqual(4, Mascot.objects.filter(name=mascot2_v1.name).count())
         self.assertEqual(team, rerestored.team)
+
+    def testOverTime(self):
+        team1 = Team.objects.create(name='team1.v1')
+        team2 = Team.objects.create(name='team2.v1')
+        p1 = Player.objects.create(name='p1.v1', team=team1)
+        p2 = Player.objects.create(name='p2.v1', team=team1)
+        a1 = Award.objects.create(name='a1.v1')
+        t1 = get_utc_now()
+        sleep(0.001)
+
+        p1 = p1.clone()
+        p1.name = 'p1.v2'
+        p1.save()
+        t2 = get_utc_now()
+        sleep(0.001)
+
+        p1.delete()
+        a1.players.add(p2)
+        t3 = get_utc_now()
+        sleep(0.001)
+
+        a1.players = []
+        t4 = get_utc_now()
+        sleep(0.001)
+
+        p1 = Player.objects.get(name='p1.v2').restore(team=team2)
+
+        # p1 did exist at t2, but not at t3.
+        self.assertIsNotNone(Player.objects.as_of(t2).filter(name='p1.v2').first())
+        self.assertIsNone(Player.objects.as_of(t3).filter(name='p1.v2').first())
+
+        # p1 re-appeared later with team2, though.
+        self.assertEqual(team2, Player.objects.current.get(name='p1.v2').team)
+
+        # many-to-many relations
+        self.assertEqual([], list(Award.objects.as_of(t2).get(name='a1.v1').players.all()))
+        self.assertEqual('p2.v1', Award.objects.as_of(t3).get(name='a1.v1').players.first().name)
+        self.assertEqual([], list(Award.objects.current.get(name='a1.v1').players.all()))
+
+        # Expected version counts:
+        self.assertEqual(1, Team.objects.filter(name='team1.v1').count())
+        self.assertEqual(1, Team.objects.filter(name='team2.v1').count())
+        self.assertEqual(3, Player.objects.filter(identity=p1.identity).count())
+        self.assertEqual(1, Player.objects.filter(name='p2.v1').count())
+        m2m_manager = Award._meta.get_field_by_name('players')[0].rel.through.objects
+        self.assertEqual(1, m2m_manager.all().count())
