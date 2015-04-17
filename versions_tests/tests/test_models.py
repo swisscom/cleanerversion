@@ -2013,3 +2013,65 @@ class SpecifiedUUIDTest(TestCase):
 
         # Thanks to that artificial manipulation, p is now the previous version of p2:
         self.assertEqual(p.name, Person.objects.previous_version(p2).name)
+
+
+class VersionRestoreTest(TestCase):
+    def setUp(self):
+        sf = City.objects.create(name="San Francisco")
+        forty_niners = Team.objects.create(name='49ers', city=sf)
+        player1 = Player.objects.create(name="Montana", team=forty_niners)
+        best_quarterback = Award.objects.create(name="Best Quarterback")
+        best_attitude = Award.objects.create(name="Best Attitude")
+        player1.awards.add(best_quarterback, best_attitude)
+
+        self.player1 = player1
+        self.awards = {
+            'best_quarterback': best_quarterback,
+            'best_attitude': best_attitude,
+        }
+        self.forty_niners = forty_niners
+
+
+    def testRestoreLatestVersion(self):
+        self.player1.delete()
+        deleted_at = self.player1.version_end_date
+        player1_pk = self.player1.pk
+
+        restored = self.player1.restore()
+        self.assertEqual(player1_pk, restored.pk)
+        self.assertIsNone(restored.version_end_date)
+
+        # There should be no relationships restored:
+        self.assertIsNone(restored.team_id)
+        self.assertListEqual([], list(restored.awards.all()))
+
+        # The relationships are still present on the previous version.
+        previous = Player.objects.previous_version(restored)
+        self.assertEqual(deleted_at, previous.version_end_date)
+        self.assertSetEqual(set(previous.awards.all()), set(self.awards.values()))
+        self.assertEqual(self.forty_niners, previous.team)
+
+    def testRestorePreviousVersion(self):
+        p1 = self.player1.clone()
+        p1.name = 'Joe'
+        p1.save()
+        player1_pk = self.player1.pk
+
+        self.player1.restore()
+
+        with self.assertRaises(ObjectDoesNotExist):
+            Player.objects.current.get(name='Joe')
+
+        restored = Player.objects.current.get(name='Montana')
+
+        self.assertEqual(player1_pk, restored.pk)
+        self.assertIsNone(restored.version_end_date)
+
+        # There should be no relationships restored:
+        self.assertIsNone(restored.team_id)
+        self.assertListEqual([], list(restored.awards.all()))
+
+        # The relationships are also present on the previous version.
+        previous = Player.objects.previous_version(restored)
+        self.assertSetEqual(set(previous.awards.all()), set(self.awards.values()))
+        self.assertEqual(self.forty_niners, previous.team)

@@ -21,7 +21,8 @@ from django import VERSION
 
 if VERSION[:2] >= (1, 7):
     from django.apps.registry import apps
-from django.core.exceptions import SuspiciousOperation, MultipleObjectsReturned, ObjectDoesNotExist
+from django.core.exceptions import SuspiciousOperation, ObjectDoesNotExist
+from django.db import transaction
 from django.db.models.base import Model
 from django.db.models import Q
 from django.db.models.fields import FieldDoesNotExist
@@ -979,6 +980,8 @@ class Versionable(models.Model):
 
     VERSION_IDENTIFIER_FIELD = 'id'
     OBJECT_IDENTIFIER_FIELD = 'identity'
+    VERSIONABLE_FIELDS = [VERSION_IDENTIFIER_FIELD, OBJECT_IDENTIFIER_FIELD, 'version_start_date',
+                          'version_end_date', 'version_birth_date']
 
     id = models.CharField(max_length=36, primary_key=True)
     """id stands for ID and is the primary key; sometimes also referenced as the surrogate key"""
@@ -1129,12 +1132,8 @@ class Versionable(models.Model):
             earlier_version._not_created = True
 
         # re-create ManyToMany relations
-        for field in earlier_version._meta.many_to_many:
-            earlier_version.clone_relations(later_version, field.attname, forced_version_date)
-
-        if hasattr(earlier_version._meta, 'many_to_many_related'):
-            for rel in earlier_version._meta.many_to_many_related:
-                earlier_version.clone_relations(later_version, rel.via_field_name, forced_version_date)
+        for field_name in self.get_all_m2m_field_names():
+            earlier_version.clone_relations(later_version, field_name, forced_version_date)
 
         return later_version
 
@@ -1190,6 +1189,70 @@ class Versionable(models.Model):
         # - create entries that were 'current', but which have been relieved in this method run
         source.through.objects.bulk_create([r for r in m2m_rels if hasattr(r, '_not_created') and r._not_created])
 
+    def restore(self, **kwargs):
+        """
+        Restores this version as a new version, and returns this new version.
+
+        If a current version already exists, it will be terminated before restoring this version.
+
+        Relations (foreign key, reverse foreign key, many-to-many) are not restored with the old
+        version.  If provided in kwargs, (Versioned)ForeignKey fields will be set to the provided
+        values.
+
+        If a (Versioned)ForeignKey is not nullable and no value is provided for it in kwargs, a
+        foobarError will be raised.
+
+        :param kwargs: arguments used to initialize the class instance
+        :return: Versionable
+        """
+        if not self.pk:
+            raise ValueError('Instance must be saved and terminated before it can be restored.')
+
+        if self.is_current:
+            raise ValueError('This is the current version, no need to restore it.')
+
+        cls = self.__class__
+
+        if not self.is_latest:
+            # Terminate the most recent version before restoring this version.
+            cls.objects.current_version(self).delete()
+
+        now = get_utc_now()
+        restored = copy.copy(self)
+        restored.version_end_date = None
+        restored.version_start_date = now
+
+        for field in cls._meta.local_fields:
+            try:
+                if field.name not in Versionable.VERSIONABLE_FIELDS:
+                    setattr(restored, field.name, getattr(kwargs, field.name))
+
+            except AttributeError:
+                if isinstance(field, ForeignKey):
+                    setattr(restored, field.name, None)
+
+        self.id = six.u(str(uuid.uuid4()))
+
+        with transaction.atomic():
+            self.save()
+            restored.save()
+
+            # Update ManyToMany relations to point to the old version's id instead of the restored version's id.
+            for field_name in self.get_all_m2m_field_names():
+                manager = getattr(restored, field_name)  # returns a VersionedRelatedManager instance
+                manager.through.objects.filter(**{manager.source_field.attname: restored.id}).update(
+                    **{manager.source_field_name: self})
+
+            return restored
+
+    def get_all_m2m_field_names(self):
+        opts = self._meta
+        rel_field_names = [field.attname for field in opts.many_to_many]
+        if hasattr(opts, 'many_to_many_related'):
+            rel_field_names += [rel.via_field_name for rel in opts.many_to_many_related]
+
+        return rel_field_names
+
     @staticmethod
     def matches_querytime(instance, querytime):
         """
@@ -1206,6 +1269,7 @@ class Versionable(models.Model):
 
         return (instance.version_start_date <= querytime.time
                 and (instance.version_end_date is None or instance.version_end_date > querytime.time))
+
 
 class VersionedManyToManyModel(object):
     """
