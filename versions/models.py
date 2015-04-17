@@ -50,6 +50,10 @@ def get_utc_now():
 QueryTime = namedtuple('QueryTime', 'time active')
 
 
+class ForeignKeyRequiresValueError(ValueError):
+    pass
+
+
 class VersionManager(models.Manager):
     """
     This is the Manager-class for any class that inherits from Versionable
@@ -1200,7 +1204,7 @@ class Versionable(models.Model):
         values.
 
         If a (Versioned)ForeignKey is not nullable and no value is provided for it in kwargs, a
-        foobarError will be raised.
+        ForeignKeyRequiresValueError will be raised.
 
         :param kwargs: arguments used to initialize the class instance
         :return: Versionable
@@ -1213,9 +1217,10 @@ class Versionable(models.Model):
 
         cls = self.__class__
 
+        # If this is not the latest version, get it; it will need to be terminated before restoring.
+        latest = None
         if not self.is_latest:
-            # Terminate the most recent version before restoring this version.
-            cls.objects.current_version(self).delete()
+            latest =  cls.objects.current_version(self)
 
         now = get_utc_now()
         restored = copy.copy(self)
@@ -1225,15 +1230,20 @@ class Versionable(models.Model):
         for field in cls._meta.local_fields:
             try:
                 if field.name not in Versionable.VERSIONABLE_FIELDS:
-                    setattr(restored, field.name, getattr(kwargs, field.name))
+                    setattr(restored, field.name, kwargs[field.name])
 
-            except AttributeError:
+            except KeyError:
                 if isinstance(field, ForeignKey):
-                    setattr(restored, field.name, None)
+                    try:
+                        setattr(restored, field.name, None)
+                    except ValueError as e:
+                        raise ForeignKeyRequiresValueError(e.message)
 
         self.id = six.u(str(uuid.uuid4()))
 
         with transaction.atomic():
+            if latest:
+                latest.delete()
             self.save()
             restored.save()
 

@@ -28,7 +28,7 @@ from django.test import TestCase
 from django.utils.timezone import utc
 from django.utils import six
 
-from versions.models import Versionable, get_utc_now
+from versions.models import get_utc_now, ForeignKeyRequiresValueError, Versionable
 from versions_tests.models import (
     Award, B, C1, C2, C3, City, Classroom, Directory, Fan, Mascot, NonFan, Observer, Person, Player, Professor, Pupil,
     RabidFan, Student, Subject, Teacher, Team, Wine, WineDrinker, WineDrinkerHat, WizardFan
@@ -2016,7 +2016,8 @@ class SpecifiedUUIDTest(TestCase):
 
 
 class VersionRestoreTest(TestCase):
-    def setUp(self):
+
+    def setup_common(self):
         sf = City.objects.create(name="San Francisco")
         forty_niners = Team.objects.create(name='49ers', city=sf)
         player1 = Player.objects.create(name="Montana", team=forty_niners)
@@ -2031,8 +2032,8 @@ class VersionRestoreTest(TestCase):
         }
         self.forty_niners = forty_niners
 
-
     def testRestoreLatestVersion(self):
+        self.setup_common()
         self.player1.delete()
         deleted_at = self.player1.version_end_date
         player1_pk = self.player1.pk
@@ -2040,6 +2041,7 @@ class VersionRestoreTest(TestCase):
         restored = self.player1.restore()
         self.assertEqual(player1_pk, restored.pk)
         self.assertIsNone(restored.version_end_date)
+        self.assertEqual(2, Player.objects.filter(name=restored.name).count())
 
         # There should be no relationships restored:
         self.assertIsNone(restored.team_id)
@@ -2052,6 +2054,7 @@ class VersionRestoreTest(TestCase):
         self.assertEqual(self.forty_niners, previous.team)
 
     def testRestorePreviousVersion(self):
+        self.setup_common()
         p1 = self.player1.clone()
         p1.name = 'Joe'
         p1.save()
@@ -2063,9 +2066,9 @@ class VersionRestoreTest(TestCase):
             Player.objects.current.get(name='Joe')
 
         restored = Player.objects.current.get(name='Montana')
-
         self.assertEqual(player1_pk, restored.pk)
         self.assertIsNone(restored.version_end_date)
+        self.assertEqual(2, Player.objects.filter(name=restored.name).count())
 
         # There should be no relationships restored:
         self.assertIsNone(restored.team_id)
@@ -2075,3 +2078,25 @@ class VersionRestoreTest(TestCase):
         previous = Player.objects.previous_version(restored)
         self.assertSetEqual(set(previous.awards.all()), set(self.awards.values()))
         self.assertEqual(self.forty_niners, previous.team)
+
+    def testRestoreWithRequiredForeignKey(self):
+        team = Team.objects.create(name="Flying Pigs")
+        mascot_v1 = Mascot.objects.create(name="Curly", team=team)
+        mascot_v1.delete()
+        with self.assertRaises(ForeignKeyRequiresValueError):
+            mascot_v1.restore()
+
+        self.assertEqual(1, Mascot.objects.filter(name=mascot_v1.name).count())
+
+        mascot2_v1 = Mascot.objects.create(name="Big Ham", team=team)
+        mascot2_v1.clone()
+        with self.assertRaises(ForeignKeyRequiresValueError):
+            mascot2_v1.restore()
+
+        self.assertEqual(2, Mascot.objects.filter(name=mascot2_v1.name).count())
+        self.assertEqual(1, Mascot.objects.current.filter(name=mascot2_v1.name).count())
+
+        team2 = Team.objects.create(name="Submarine Sandwiches")
+        restored = mascot2_v1.restore(team=team2)
+        self.assertEqual(3, Mascot.objects.filter(name=mascot2_v1.name).count())
+        self.assertEqual(team2, restored.team)

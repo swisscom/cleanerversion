@@ -29,6 +29,7 @@ class B(Versionable):
 # - OneToManyTest
 # - PrefetchingTest
 # - DeletionHandlerTest
+# - VersionRestoreTest
 class City(Versionable):
     name = CharField(max_length=200)
 
