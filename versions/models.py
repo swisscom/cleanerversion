@@ -1242,7 +1242,7 @@ class Versionable(models.Model):
                     try:
                         setattr(restored, field.name, None)
                     except ValueError as e:
-                        raise ForeignKeyRequiresValueError(e.message)
+                        raise ForeignKeyRequiresValueError(e.args[0])
 
         self.id = six.u(str(uuid.uuid4()))
 
