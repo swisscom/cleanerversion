@@ -1230,7 +1230,12 @@ class Versionable(models.Model):
         for field in cls._meta.local_fields:
             try:
                 if field.name not in Versionable.VERSIONABLE_FIELDS:
-                    setattr(restored, field.name, kwargs[field.name])
+                    value = kwargs[field.name]
+                    attr = field.name
+                    if isinstance(field, ForeignKey):
+                        if isinstance(value, six.string_types):
+                            attr += '_id'
+                    setattr(restored, attr, value)
 
             except KeyError:
                 if isinstance(field, ForeignKey):

@@ -2083,6 +2083,8 @@ class VersionRestoreTest(TestCase):
         team = Team.objects.create(name="Flying Pigs")
         mascot_v1 = Mascot.objects.create(name="Curly", team=team)
         mascot_v1.delete()
+
+        # Restoring without supplying a value for the required foreign key will fail.
         with self.assertRaises(ForeignKeyRequiresValueError):
             mascot_v1.restore()
 
@@ -2096,7 +2098,13 @@ class VersionRestoreTest(TestCase):
         self.assertEqual(2, Mascot.objects.filter(name=mascot2_v1.name).count())
         self.assertEqual(1, Mascot.objects.current.filter(name=mascot2_v1.name).count())
 
+        # If a value (object or pk) is supplied, the restore will succeed.
         team2 = Team.objects.create(name="Submarine Sandwiches")
         restored = mascot2_v1.restore(team=team2)
         self.assertEqual(3, Mascot.objects.filter(name=mascot2_v1.name).count())
         self.assertEqual(team2, restored.team)
+
+        restored.delete()
+        rerestored = mascot2_v1.restore(team=team.pk)
+        self.assertEqual(4, Mascot.objects.filter(name=mascot2_v1.name).count())
+        self.assertEqual(team, rerestored.team)
