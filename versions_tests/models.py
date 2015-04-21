@@ -27,6 +27,7 @@ class B(Versionable):
 # Models for
 # - OneToManyTest
 # - PrefetchingTest
+# - VersionNavigationAsOfTest
 class City(Versionable):
     name = CharField(max_length=200)
 

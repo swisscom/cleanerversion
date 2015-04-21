@@ -500,6 +500,21 @@ you will get your existing obj returned, not the newest version from the databas
     next = Items.objects.next_version(item1)
 
 
+``current_version``, ``previous_version`` and ``next_vesion`` accept an optional parameter ``relations_as_of``.
+This allows you to control the point in time which is used for accessing related objects (e.g. related by foreign key,
+reverse foreign key, one-to-one or many-to-many fields).  Valid values for ``relations_as_of`` are:
+
+- ``'end'``: use version_end_date minus one microsecond.  If the version is current, current related objects are
+  returned when accessing relation fields.  This is the default.
+
+- ``'start'``: use version_start_date
+
+- ``datetime object``: use this datetime.  If the supplied datetime lies outside of the validity range of the version,
+  a ``ValueError`` will be raised.
+
+- ``None``: no restriction is done.  All objects ever associated with this object will be returned when accessing
+  relation fields.
+
 Unique Indexes
 ==============
 To have unique indexes with versioned models takes a bit of care. The issue here is that multiple versions having the same

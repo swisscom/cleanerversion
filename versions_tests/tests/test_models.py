@@ -319,6 +319,103 @@ class VersionNavigationTest(TestCase):
         self.assertRaises(MultipleObjectsReturned, lambda: B.objects.previous_version(v3))
 
 
+class VersionNavigationAsOfTest(TestCase):
+    def setUp(self):
+        city1 = City.objects.create(name='city1')
+        city2 = City.objects.create(name='city2')
+        team1 = Team.objects.create(name='team1', city=city1)
+        team2 = Team.objects.create(name='team2', city=city1)
+        team3 = Team.objects.create(name='team3', city=city2)
+        # At t1: city1 - (team1, team2) / city2 - (team3)
+        self.t1 = get_utc_now()
+
+        sleep(0.01)
+        team2 = team2.clone()
+        team2.city = city2
+        team2.save()
+        # At t2: city1 - (team1) / city2 - (team2, team3)
+        self.t2 = get_utc_now()
+
+        sleep(0.01)
+        city1 = city1.clone()
+        city1.name = 'city1.a'
+        city1.save()
+        # At t3: city1.a - (team1) / city2 - (team1, team2, team3)
+        self.t3 = get_utc_now()
+
+        sleep(0.01)
+        team1 = team1.clone()
+        team1.name = 'team1.a'
+        team1.city = city2
+        team1.save()
+        # At t4: city1.a - () / city2 - (team1.a, team2, team3)
+        self.t4 = get_utc_now()
+
+        sleep(0.01)
+        team1 = team1.clone()
+        team1.city = city1
+        team1.name = 'team1.b'
+        team1.save()
+        # At t5: city1.a - (team1.b) / city2 - (team2, team3)
+        self.t5 = get_utc_now()
+
+    def test_as_of_parameter(self):
+        city1_t2 = City.objects.as_of(self.t2).get(name__startswith='city1')
+        self.assertEqual(1, city1_t2.team_set.all().count())
+        self.assertFalse(city1_t2.is_current)
+
+        # as_of 'end' for current version means "current", not a certain point in time
+        city1_current = City.objects.next_version(city1_t2, relations_as_of='end')
+        self.assertTrue(city1_current.is_current)
+        self.assertIsNone(city1_current._querytime.time)
+        teams = city1_current.team_set.all()
+        self.assertEqual(1, teams.count())
+        self.assertEqual('team1.b', teams[0].name)
+
+        # as_of 'end' for non-current version means at a certain point in time
+        city1_previous = City.objects.previous_version(city1_current, relations_as_of='end')
+        self.assertIsNotNone(city1_previous._querytime.time)
+
+        # as_of 'start': returns version at the very start of it's life.
+        city1_latest_at_birth = City.objects.next_version(city1_t2, relations_as_of='start')
+        self.assertTrue(city1_latest_at_birth.is_current)
+        self.assertEqual(1, city1_latest_at_birth.team_set.count())
+        self.assertIsNotNone(city1_latest_at_birth._querytime.time)
+        self.assertEqual(city1_latest_at_birth._querytime.time, city1_latest_at_birth.version_start_date)
+
+        # as_of datetime: returns a version at a given point in time.
+        city1_t4 = City.objects.next_version(city1_t2, relations_as_of=self.t4)
+        self.assertTrue(city1_latest_at_birth.is_current)
+        self.assertIsNotNone(city1_latest_at_birth._querytime.time)
+        teams = city1_latest_at_birth.team_set.all()
+        self.assertEqual(1, teams.count())
+        self.assertEqual('team1', teams[0].name)
+
+        # as_of None: returns object without time restriction for related objects.
+        # This means, that all other related object versions that have been associated with
+        # this object are returned when queried, without applying any time restriction.
+        city1_v2 = City.objects.current_version(city1_t2, relations_as_of=None)
+        self.assertFalse(city1_v2._querytime.active)
+        teams = city1_v2.team_set.all()
+        team_names = {team.name for team in teams}
+        self.assertEqual(3, teams.count())
+        self.assertSetEqual({'team1', 'team2', 'team1.b'}, team_names)
+
+    def test_invalid_as_of_parameter(self):
+        city = City.objects.current.get(name__startswith='city1')
+
+        with self.assertRaises(TypeError):
+            City.objects.previous_version(city, relations_as_of='endlich')
+
+        # Using an as_of time before the object's validity period:
+        with self.assertRaises(ValueError):
+            City.objects.current_version(city, relations_as_of=self.t1)
+
+        # Using an as_of time after the object's validity period:
+        with self.assertRaises(ValueError):
+            City.objects.previous_version(city, relations_as_of=self.t5)
+
+
 class HistoricObjectsHandling(TestCase):
     t0 = datetime.datetime(1980, 1, 1, tzinfo=utc)
     t1 = datetime.datetime(1984, 4, 23, tzinfo=utc)
