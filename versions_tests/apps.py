@@ -10,9 +10,14 @@ def index_adjustments(sender, using=None, **kwargs):
     :param str sender: database alias
     :param kwargs:
     """
-    from versions.util.postgresql import remove_uuid_id_like_indexes, create_current_version_unique_indexes
+    from versions.util.postgresql import (
+        remove_uuid_id_like_indexes,
+        create_current_version_unique_indexes,
+        create_current_version_unique_identity_indexes
+    )
     remove_uuid_id_like_indexes(sender.name, using)
     create_current_version_unique_indexes(sender.name, using)
+    create_current_version_unique_identity_indexes(sender.name, using)
 
 class VersionsTestsConfig(AppConfig):
     name = 'versions_tests'

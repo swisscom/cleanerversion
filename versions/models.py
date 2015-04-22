@@ -16,11 +16,13 @@ import copy
 import datetime
 import uuid
 from collections import namedtuple
+import re
 from django import VERSION
 
 if VERSION[:2] >= (1, 7):
     from django.apps.registry import apps
-from django.core.exceptions import SuspiciousOperation, MultipleObjectsReturned, ObjectDoesNotExist
+from django.core.exceptions import SuspiciousOperation, ObjectDoesNotExist
+from django.db import transaction
 from django.db.models.base import Model
 from django.db.models import Q
 from django.db.models.fields import FieldDoesNotExist
@@ -38,6 +40,8 @@ from django.utils import six
 
 from django.db import models, router
 
+from versions.deletion import VersionedCollector
+
 
 def get_utc_now():
     return datetime.datetime.utcnow().replace(tzinfo=utc)
@@ -46,11 +50,19 @@ def get_utc_now():
 QueryTime = namedtuple('QueryTime', 'time active')
 
 
+class ForeignKeyRequiresValueError(ValueError):
+    pass
+
+
 class VersionManager(models.Manager):
     """
     This is the Manager-class for any class that inherits from Versionable
     """
     use_for_related_fields = True
+
+    # Based on http://en.wikipedia.org/wiki/Universally_unique_identifier#Version_4_.28random.29
+    uuid_valid_form_regex = re.compile(
+        '^[A-Fa-f0-9]{8}-[A-Fa-f0-9]{4}-4[A-Fa-f0-9]{3}-[89aAbB][A-Fa-f0-9]{3}-[A-Fa-f0-9]{12}$')
 
     def get_queryset(self):
         """
@@ -93,17 +105,14 @@ class VersionManager(models.Manager):
         if object.version_end_date == None:
             next = object
         else:
-            try:
-                next = self.get(
-                    Q(identity=object.identity),
-                    Q(version_start_date=object.version_end_date))
-            except MultipleObjectsReturned as e:
-                raise MultipleObjectsReturned(
-                    "next_version couldn't uniquely identify the next version of object " + str(
-                        object.identity) + " to be returned\n" + str(e))
-            except ObjectDoesNotExist as e:
+            next = self.filter(
+                Q(identity=object.identity),
+                Q(version_start_date__gte=object.version_end_date)
+            ).order_by('version_start_date').first()
+
+            if not next:
                 raise ObjectDoesNotExist(
-                    "next_version couldn't find a next version of object " + str(object.identity) + "\n" + str(e))
+                    "next_version couldn't find a next version of object " + str(object.identity))
 
         return self.adjust_version_as_of(next, relations_as_of)
 
@@ -125,20 +134,14 @@ class VersionManager(models.Manager):
         if object.version_birth_date == object.version_start_date:
             previous = object
         else:
-            try:
-                previous = self.get(
-                    Q(identity=object.identity),
-                    Q(version_end_date=object.version_start_date))
-            except MultipleObjectsReturned as e:
-                raise MultipleObjectsReturned(
-                    "previous_version couldn't uniquely identify the previous version of object " + str(
-                        object.identity) + " to be returned\n" + str(e))
-            # This should never-ever happen, since going prior a first version of an object should be avoided by the
-            # first test of this method
-            except ObjectDoesNotExist as e:
+            previous = self.filter(
+                Q(identity=object.identity),
+                Q(version_end_date__lte=object.version_start_date)
+            ).order_by('-version_end_date').first()
+
+            if not previous:
                 raise ObjectDoesNotExist(
-                    "previous_version couldn't find a previous version of object " + str(object.identity) + "\n" + str(
-                        e))
+                    "previous_version couldn't find a previous version of object " + str(object.identity))
 
         return self.adjust_version_as_of(previous, relations_as_of)
 
@@ -233,23 +236,46 @@ class VersionManager(models.Manager):
         """
         return self._create_at(None, **kwargs)
 
-    def _create_at(self, timestamp=None, **kwargs):
+    def _create_at(self, timestamp=None, id=None, forced_identity=None, **kwargs):
         """
         WARNING: Only for internal use and testing.
 
         Create a Versionable having a version_start_date and version_birth_date set to some pre-defined timestamp
         :param timestamp: point in time at which the instance has to be created
+        :param id: version 4 UUID unicode string.  Usually this is not specified, it will be automatically created.
+        :param forced_identity: version 4 UUID unicode string.  For internal use only.
         :param kwargs: arguments needed for initializing the instance
         :return: an instance of the class
         """
-        ident = six.u(str(uuid.uuid4()))
+        if id:
+            if not self.validate_uuid4(id):
+                raise ValueError("id, if provided, must be a valid UUID version 4 string")
+        else:
+            id = str(uuid.uuid4())
+
+        # Ensure that it's a unicode string:
+        id = six.text_type(id)
+
+        if forced_identity:
+            if not self.validate_uuid4(forced_identity):
+                raise ValueError("forced_identity, if provided, must be a valid UUID version 4 string")
+            ident = six.text_type(forced_identity)
+        else:
+            ident = id
+
         if timestamp is None:
             timestamp = get_utc_now()
-        kwargs['id'] = ident
+        kwargs['id'] = id
         kwargs['identity'] = ident
         kwargs['version_start_date'] = timestamp
         kwargs['version_birth_date'] = timestamp
         return super(VersionManager, self).create(**kwargs)
+
+    def validate_uuid4(self, uuid_string):
+        """
+        Check that the UUID string is in fact a valid uuid4.
+        """
+        return self.uuid_valid_form_regex.match(uuid_string) is not None
 
 
 class VersionedWhereNode(WhereNode):
@@ -1027,6 +1053,8 @@ class Versionable(models.Model):
 
     VERSION_IDENTIFIER_FIELD = 'id'
     OBJECT_IDENTIFIER_FIELD = 'identity'
+    VERSIONABLE_FIELDS = [VERSION_IDENTIFIER_FIELD, OBJECT_IDENTIFIER_FIELD, 'version_start_date',
+                          'version_end_date', 'version_birth_date']
 
     id = models.CharField(max_length=36, primary_key=True)
     """id stands for ID and is the primary key; sometimes also referenced as the surrogate key"""
@@ -1063,7 +1091,13 @@ class Versionable(models.Model):
         self._querytime = QueryTime(time=None, active=False)
 
     def delete(self, using=None):
-        self._delete_at(get_utc_now(), using)
+        using = using or router.db_for_write(self.__class__, instance=self)
+        assert self._get_pk_val() is not None, "%s object can't be deleted because its %s attribute is set to None." % (self._meta.object_name, self._meta.pk.attname)
+
+        now = get_utc_now()
+        collector = VersionedCollector(using=using)
+        collector.collect([self])
+        collector.delete(now)
 
     def _delete_at(self, timestamp, using=None):
         """
@@ -1085,6 +1119,29 @@ class Versionable(models.Model):
     @property
     def is_current(self):
         return self.version_end_date is None
+
+    @property
+    def is_latest(self):
+        """
+        Checks if this is the latest version.
+
+        Note that this will not check the database for a possible newer version.
+        It simply inspects the object's in-memory state.
+
+        :return: boolean
+        """
+        return self.id == self.identity
+
+    @property
+    def is_terminated(self):
+        """
+        Checks if this version has been terminated.
+
+        This will be true if a newer version has been created, or if the version has been "deleted".
+
+        :return: boolean
+        """
+        return self.version_end_date is not None
 
     @property
     def as_of(self):
@@ -1148,12 +1205,8 @@ class Versionable(models.Model):
             earlier_version._not_created = True
 
         # re-create ManyToMany relations
-        for field in earlier_version._meta.many_to_many:
-            earlier_version.clone_relations(later_version, field.attname, forced_version_date)
-
-        if hasattr(earlier_version._meta, 'many_to_many_related'):
-            for rel in earlier_version._meta.many_to_many_related:
-                earlier_version.clone_relations(later_version, rel.via_field_name, forced_version_date)
+        for field_name in self.get_all_m2m_field_names():
+            earlier_version.clone_relations(later_version, field_name, forced_version_date)
 
         return later_version
 
@@ -1209,6 +1262,81 @@ class Versionable(models.Model):
         # - create entries that were 'current', but which have been relieved in this method run
         source.through.objects.bulk_create([r for r in m2m_rels if hasattr(r, '_not_created') and r._not_created])
 
+    def restore(self, **kwargs):
+        """
+        Restores this version as a new version, and returns this new version.
+
+        If a current version already exists, it will be terminated before restoring this version.
+
+        Relations (foreign key, reverse foreign key, many-to-many) are not restored with the old
+        version.  If provided in kwargs, (Versioned)ForeignKey fields will be set to the provided
+        values.
+
+        If a (Versioned)ForeignKey is not nullable and no value is provided for it in kwargs, a
+        ForeignKeyRequiresValueError will be raised.
+
+        :param kwargs: arguments used to initialize the class instance
+        :return: Versionable
+        """
+        if not self.pk:
+            raise ValueError('Instance must be saved and terminated before it can be restored.')
+
+        if self.is_current:
+            raise ValueError('This is the current version, no need to restore it.')
+
+        cls = self.__class__
+
+        # If this is not the latest version, get it; it will need to be terminated before restoring.
+        latest = None
+        if not self.is_latest:
+            latest =  cls.objects.current_version(self)
+
+        now = get_utc_now()
+        restored = copy.copy(self)
+        restored.version_end_date = None
+        restored.version_start_date = now
+
+        for field in cls._meta.local_fields:
+            try:
+                if field.name not in Versionable.VERSIONABLE_FIELDS:
+                    value = kwargs[field.name]
+                    attr = field.name
+                    if isinstance(field, ForeignKey):
+                        if isinstance(value, six.string_types):
+                            attr += '_id'
+                    setattr(restored, attr, value)
+
+            except KeyError:
+                if isinstance(field, ForeignKey):
+                    try:
+                        setattr(restored, field.name, None)
+                    except ValueError as e:
+                        raise ForeignKeyRequiresValueError(e.args[0])
+
+        self.id = six.u(str(uuid.uuid4()))
+
+        with transaction.atomic():
+            if latest:
+                latest.delete()
+            self.save()
+            restored.save()
+
+            # Update ManyToMany relations to point to the old version's id instead of the restored version's id.
+            for field_name in self.get_all_m2m_field_names():
+                manager = getattr(restored, field_name)  # returns a VersionedRelatedManager instance
+                manager.through.objects.filter(**{manager.source_field.attname: restored.id}).update(
+                    **{manager.source_field_name: self})
+
+            return restored
+
+    def get_all_m2m_field_names(self):
+        opts = self._meta
+        rel_field_names = [field.attname for field in opts.many_to_many]
+        if hasattr(opts, 'many_to_many_related'):
+            rel_field_names += [rel.via_field_name for rel in opts.many_to_many_related]
+
+        return rel_field_names
+
     @staticmethod
     def matches_querytime(instance, querytime):
         """
@@ -1225,6 +1353,7 @@ class Versionable(models.Model):
 
         return (instance.version_start_date <= querytime.time
                 and (instance.version_end_date is None or instance.version_end_date > querytime.time))
+
 
 class VersionedManyToManyModel(object):
     """

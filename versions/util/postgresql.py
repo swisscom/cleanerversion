@@ -126,3 +126,31 @@ def create_current_version_unique_indexes(app_name, database=None):
                     indexes_created += 1
 
     return indexes_created
+
+def create_current_version_unique_identity_indexes(app_name, database=None):
+    """
+    Add partial unique indexes for the the identity column of versionable models.
+
+    This enforces that no two *current* versions can have the same identity.
+
+    This will only try to create indexes if they do not exist in the database, so it
+    should be safe to run in a post_migrate signal handler.  Running it several
+    times should leave the database in the same state as running it once.
+    :param str app_name: application name whose Versionable models will be acted on.
+    :param str database: database alias to use.  If None, use default connection.
+    :return: number of partial unique indexes created
+    :rtype: int
+    """
+
+    indexes_created = 0
+    connection = database_connection(database)
+    with connection.cursor() as cursor:
+        for model in versionable_models(app_name):
+            table_name = model._meta.db_table
+            index_name = '%s_%s_identity_v_uniq' % (app_name, table_name)
+            if not index_exists(cursor, index_name):
+                cursor.execute("CREATE UNIQUE INDEX %s ON %s(%s) WHERE version_end_date IS NULL"
+                               % (index_name, table_name, 'identity'))
+                indexes_created += 1
+
+    return indexes_created

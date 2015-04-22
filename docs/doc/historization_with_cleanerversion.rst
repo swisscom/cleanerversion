@@ -499,7 +499,6 @@ you will get your existing obj returned, not the newest version from the databas
 
     next = Items.objects.next_version(item1)
 
-
 ``current_version``, ``previous_version`` and ``next_vesion`` accept an optional parameter ``relations_as_of``.
 This allows you to control the point in time which is used for accessing related objects (e.g. related by foreign key,
 reverse foreign key, one-to-one or many-to-many fields).  Valid values for ``relations_as_of`` are:
@@ -514,6 +513,77 @@ reverse foreign key, one-to-one or many-to-many fields).  Valid values for ``rel
 
 - ``None``: no restriction is done.  All objects ever associated with this object will be returned when accessing
   relation fields.
+
+Deleting objects
+================
+You can expect ``delete()`` to behave like you are accustomed to in Django, with these differences:
+
+Not actually deleted from the database
+--------------------------------------
+When you call ``delete()`` on a versioned object, it is not actually removed from the database.  Instead, it's
+``version_end_date`` is changed from None to a timestamp.
+
+The same is true for the VersionedManyToManyField entries associated with the object you call ``delete()`` on:
+they are terminated by setting a ``version_end_date``.
+
+on_delete handlers
+------------------
+`on_delete handlers <https://docs.djangoproject.com/en/stable/ref/models/fields/#django.db.models.ForeignKey.on_delete>`_
+behave like this:
+
+CASCADE
+~~~~~~~
+The deletion is cascaded.  In the CleanerVersion context, this means that the cascaded-to versions are terminated.
+
+SET, SET_NULL, SET_DEFAULT
+~~~~~~~~~~~~~~~~~~~~~~~~~~
+The cascaded-to objects are cloned before SET, SET_NULL, or SET_DEFAULT are applied.
+
+DO_NOTHING
+~~~~~~~~~~
+Does nothing, just like in standard Django.  This has the effect of leaving a current object with a reference to
+a deleted object.  However, if you ask the current object for it's relations, it will not return the deleted object,
+because the deleted object does not match the current object's query time restriction (e.g. only current objects).
+
+PROTECTED
+~~~~~~~~~
+Behaves just like in standard Django.
+
+Restoring previous versions
+===========================
+Previous versions can be restored like this::
+
+    restored_version = old_version.restore()
+
+``restored_version`` will now be the current version. This creates a new version, the old version is left untouched.
+If any current version existed when this code ran, it was terminated before the restored version was created.
+
+Be aware that relations (VersionedForeignKey, ManyToManyField, reverse foreign keys, etc.) are not restored.  You will
+need to restore relations yourself if necessary.
+
+If the object being restored has a non-nullable VersionedForeignKey, you will need to supply a value (object instance
+or pk) for this field.  If you do not supply a value, a ``versions.ForeignKeyRequiresValueError`` will be raised.
+
+Values can also be provided for other, non-ForeignKey fields at restore time.
+
+Example:
+
+Models::
+
+    class Team(Versionable):
+        name = models.CharField(max_length=50)
+
+    class Mascot(Versionable):
+        name = models.CharField(max_length=50)
+        age = models.IntegerField()
+        team = VersionedForeignKey(Team, null=False)
+
+Code::
+
+    beaver = beaver_v1.restore(team=mascot_v1.team)
+
+    new_team_pk = Team.objects.current.get(name='Black Stripes').pk
+    tiger = tiger_v4.restore(team=new_team_pk, age=33)
 
 Unique Indexes
 ==============
@@ -537,6 +607,19 @@ enforces that name and phone_number are unique together when the version_end_dat
 a similar capability.  A helper method for creating these partially unique indexes is provided for Postgresql, see
 the `Postgresql specific`_ section for more detail.
 
+Specifying the id of an object at creation time
+===============================================
+It is possible to specify an id when creating a new object, instead of letting CleanerVersion do this for you.  The
+id must be a unicode string representing a
+`version 4 UUID <http://en.wikipedia.org/wiki/Universally_unique_identifier#Version_4_.28random.29>`_.
+
+**Be careful if you do this!**.  The possibility of collisions can increase greatly if not all sources that specify
+a UUID use sufficient entropy. See
+`this <http://en.wikipedia.org/wiki/Universally_unique_identifier#Random_UUID_probability_of_duplicates>`_ for more
+details.
+
+The database-level unique constraint on the id will prohibit a duplicate uuid from being inserted, but your application
+will need to be ready to handle that.
 
 Postgresql specific
 ===================
@@ -560,8 +643,13 @@ If there are multiple sets of columns that should be unique, use something like 
 
     VERSION_UNIQUE = [['field1', 'field2'], ['field3', 'field4']]
 
-For an example of how to transparently create the database indexes for these VERSION_UNIQUE definitions in a Django app, as well
-as removing the extra like indexes created on the CharField columns, see:
+As an extra method of protection against bad data appearing, it is good to ensure that only one version of an object
+is current at the same time.  This can be done by adding a partially unique index for the ``identity`` column.
+You can use ``versions.util.postgresql.create_current_version_unique_identity_indexes()`` for this.
+
+For an example of how to transparently create the database indexes for these VERSION_UNIQUE definitions in a Django
+app, removing the extra like indexes created on the CharField columns, and enforcing that only one version is current
+at the same time, see:
 
 * https://github.com/swisscom/cleanerversion/blob/master/versions_tests/__init__.py
 * https://github.com/swisscom/cleanerversion/blob/master/versions_tests/apps.py
