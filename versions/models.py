@@ -1337,6 +1337,17 @@ class Versionable(models.Model):
 
         return rel_field_names
 
+    def detach(self):
+        """
+        Detaches the instance from its history.
+
+        Similar to creating a new object with the same field values.
+        """
+        self.id = self.identity = six.u(str(uuid.uuid4()))
+        self.version_start_date = self.version_birth_date = versions.models.get_utc_now()
+        self.version_end_date = None
+        return self
+
     @staticmethod
     def matches_querytime(instance, querytime):
         """
