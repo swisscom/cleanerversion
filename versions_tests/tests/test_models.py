@@ -2129,7 +2129,7 @@ class VersionRestoreTest(TestCase):
         }
         self.forty_niners = forty_niners
 
-    def testRestoreLatestVersion(self):
+    def test_restore_latest_version(self):
         self.setup_common()
         self.player1.delete()
         deleted_at = self.player1.version_end_date
@@ -2150,7 +2150,7 @@ class VersionRestoreTest(TestCase):
         self.assertSetEqual(set(previous.awards.all()), set(self.awards.values()))
         self.assertEqual(self.forty_niners, previous.team)
 
-    def testRestorePreviousVersion(self):
+    def test_restore_previous_version(self):
         self.setup_common()
         p1 = self.player1.clone()
         p1.name = 'Joe'
@@ -2176,7 +2176,7 @@ class VersionRestoreTest(TestCase):
         self.assertSetEqual(set(previous.awards.all()), set(self.awards.values()))
         self.assertEqual(self.forty_niners, previous.team)
 
-    def testRestoreWithRequiredForeignKey(self):
+    def test_restore_with_required_foreignkey(self):
         team = Team.objects.create(name="Flying Pigs")
         mascot_v1 = Mascot.objects.create(name="Curly", team=team)
         mascot_v1.delete()
@@ -2206,7 +2206,7 @@ class VersionRestoreTest(TestCase):
         self.assertEqual(4, Mascot.objects.filter(name=mascot2_v1.name).count())
         self.assertEqual(team, rerestored.team)
 
-    def testOverTime(self):
+    def test_over_time(self):
         team1 = Team.objects.create(name='team1.v1')
         team2 = Team.objects.create(name='team2.v1')
         p1 = Player.objects.create(name='p1.v1', team=team1)
