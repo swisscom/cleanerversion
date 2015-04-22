@@ -26,9 +26,10 @@ class B(Versionable):
 
 ############################################
 # Models for
+# - DeletionHandlerTest
 # - OneToManyTest
 # - PrefetchingTest
-# - DeletionHandlerTest
+# - VersionNavigationAsOfTest
 # - VersionRestoreTest
 class City(Versionable):
     name = CharField(max_length=200)
