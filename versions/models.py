@@ -1281,7 +1281,10 @@ class Versionable(models.Model):
 
         Relations (foreign key, reverse foreign key, many-to-many) are not restored with the old
         version.  If provided in kwargs, (Versioned)ForeignKey fields will be set to the provided
-        values.
+        values.  If passing an id for a (Versioned)ForeignKey, use the field.attname.  For example:
+           restore(team_id=myteam.pk)
+        If passing an object, simply use the field name, e.g.:
+           restore(team=myteam)
 
         If a (Versioned)ForeignKey is not nullable and no value is provided for it in kwargs, a
         ForeignKeyRequiresValueError will be raised.
@@ -1300,29 +1303,25 @@ class Versionable(models.Model):
         # If this is not the latest version, get it; it will need to be terminated before restoring.
         latest = None
         if not self.is_latest:
-            latest =  cls.objects.current_version(self)
+            latest = cls.objects.current_version(self)
 
         now = get_utc_now()
         restored = copy.copy(self)
         restored.version_end_date = None
         restored.version_start_date = now
 
-        for field in cls._meta.local_fields:
-            try:
-                if field.name not in Versionable.VERSIONABLE_FIELDS:
-                    value = kwargs[field.name]
-                    attr = field.name
-                    if isinstance(field, ForeignKey):
-                        if isinstance(value, six.string_types):
-                            attr += '_id'
-                    setattr(restored, attr, value)
-
-            except KeyError:
-                if isinstance(field, ForeignKey):
-                    try:
-                        setattr(restored, field.name, None)
-                    except ValueError as e:
-                        raise ForeignKeyRequiresValueError(e.args[0])
+        fields = [f for f in cls._meta.local_fields if f.name not in Versionable.VERSIONABLE_FIELDS]
+        for field in fields:
+            if field.attname in kwargs:
+                setattr(restored, field.attname, kwargs[field.attname])
+            elif field.name in kwargs:
+                setattr(restored, field.name, kwargs[field.name])
+            elif isinstance(field, ForeignKey):
+                # Set all non-provided ForeignKeys to None.  If required, raise an error.
+                try:
+                    setattr(restored, field.name, None)
+                except ValueError as e:
+                    raise ForeignKeyRequiresValueError(e.args[0])
 
         self.id = self.uuid()
 

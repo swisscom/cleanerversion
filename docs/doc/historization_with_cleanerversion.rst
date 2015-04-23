@@ -582,8 +582,10 @@ Code::
 
     beaver = beaver_v1.restore(team=mascot_v1.team)
 
+    # You can also use an id instead of an object when providing ForeignKeys, just be
+    # sure to use the field.attname (usually: field name + '_id') as the parameter name:
     new_team_pk = Team.objects.current.get(name='Black Stripes').pk
-    tiger = tiger_v4.restore(team=new_team_pk, age=33)
+    tiger = tiger_v4.restore(team_id=new_team_pk, age=33)
 
 Unique Indexes
 ==============

@@ -2202,7 +2202,7 @@ class VersionRestoreTest(TestCase):
         self.assertEqual(team2, restored.team)
 
         restored.delete()
-        rerestored = mascot2_v1.restore(team=team.pk)
+        rerestored = mascot2_v1.restore(team_id=team.pk)
         self.assertEqual(4, Mascot.objects.filter(name=mascot2_v1.name).count())
         self.assertEqual(team, rerestored.team)
 
