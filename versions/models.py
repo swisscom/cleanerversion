@@ -1341,10 +1341,16 @@ class Versionable(models.Model):
         """
         Detaches the instance from its history.
 
-        Similar to creating a new object with the same field values.
+        Similar to creating a new object with the same field values. The id and
+        identity fields are set to a new value. The returned object has not been saved,
+        call save() afterwards when you are ready to persist the object.
+
+        ManyToMany and reverse ForeignKey relations are lost for the detached object.
+
+        :return: Versionable
         """
         self.id = self.identity = six.u(str(uuid.uuid4()))
-        self.version_start_date = self.version_birth_date = versions.models.get_utc_now()
+        self.version_start_date = self.version_birth_date = get_utc_now()
         self.version_end_date = None
         return self
 
