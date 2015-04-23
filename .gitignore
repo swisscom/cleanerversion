@@ -22,6 +22,7 @@ build/*
 # Ignore testing output
 .coverage
 .tox
+sqlite.db
 
 # dev_no_debug.py imports local.py and disables Django-debugging
 cleanerversion/settings/dev_no_debug.py
