@@ -2251,3 +2251,44 @@ class VersionRestoreTest(TestCase):
         self.assertEqual(1, Player.objects.filter(name='p2.v1').count())
         m2m_manager = Award._meta.get_field_by_name('players')[0].rel.through.objects
         self.assertEqual(1, m2m_manager.all().count())
+
+class DetachTest(TestCase):
+
+    def test_simple_detach(self):
+        c1 = City.objects.create(name="Atlantis").clone()
+        c1_identity = c1.identity
+        c2 = c1.detach()
+        c2.save()
+        c1 = City.objects.current.get(pk=c1_identity)
+        self.assertEqual(c1.name, c2.name)
+        self.assertEqual(c2.id, c2.identity)
+        self.assertNotEqual(c1.id, c2.id)
+        self.assertNotEqual(c1.identity, c2.identity)
+        self.assertEqual(2, City.objects.filter(identity=c1_identity).count())
+        self.assertEqual(1, City.objects.filter(identity=c2.identity).count())
+
+    def test_detach_with_relations(self):
+        """
+        ManyToMany and reverse ForeignKey relationships are not kept. ForeignKey relationships are kept.
+        """
+        t = Team.objects.create(name='Raining Rats')
+        t_pk = t.pk
+        m = Mascot.objects.create(name="Drippy", team=t)
+        p = Player.objects.create(name="Robby", team=t)
+        p_pk = p.pk
+        a = Award.objects.create(name="Most slippery")
+        a.players.add(p)
+
+        p2 = p.detach()
+        p2.save()
+        p = Player.objects.current.get(pk=p_pk)
+        self.assertEqual(t, p.team)
+        self.assertEqual(t, p2.team)
+        self.assertListEqual([a], list(p.awards.all()))
+        self.assertListEqual([], list(p2.awards.all()))
+
+        t2 = t.detach()
+        t2.save()
+        t = Team.objects.current.get(pk=t_pk)
+        self.assertEqual({p, p2}, set(t.player_set.all()))
+        self.assertEqual([], list(t2.player_set.all()))

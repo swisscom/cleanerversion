@@ -31,6 +31,7 @@ class B(Versionable):
 # - PrefetchingTest
 # - VersionNavigationAsOfTest
 # - VersionRestoreTest
+# - DetachTest
 class City(Versionable):
     name = CharField(max_length=200)
 
