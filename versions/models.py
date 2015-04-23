@@ -61,6 +61,7 @@ class VersionManager(models.Manager):
     use_for_related_fields = True
 
     # Based on http://en.wikipedia.org/wiki/Universally_unique_identifier#Version_4_.28random.29
+    # Matches a valid hyphen-separated version 4 UUID string.
     uuid_valid_form_regex = re.compile(
         '^[A-Fa-f0-9]{8}-[A-Fa-f0-9]{4}-4[A-Fa-f0-9]{3}-[89aAbB][A-Fa-f0-9]{3}-[A-Fa-f0-9]{12}$')
 
@@ -248,16 +249,17 @@ class VersionManager(models.Manager):
         :return: an instance of the class
         """
         if id:
-            if not self.validate_uuid4(id):
+            if not self.validate_uuid(id):
                 raise ValueError("id, if provided, must be a valid UUID version 4 string")
-        else:
-            id = str(uuid.uuid4())
+            # Ensure that it's a unicode string:
+            id = six.text_type(id)
 
-        # Ensure that it's a unicode string:
-        id = six.text_type(id)
+        else:
+            id = Versionable.uuid()
+
 
         if forced_identity:
-            if not self.validate_uuid4(forced_identity):
+            if not self.validate_uuid(forced_identity):
                 raise ValueError("forced_identity, if provided, must be a valid UUID version 4 string")
             ident = six.text_type(forced_identity)
         else:
@@ -271,9 +273,9 @@ class VersionManager(models.Manager):
         kwargs['version_birth_date'] = timestamp
         return super(VersionManager, self).create(**kwargs)
 
-    def validate_uuid4(self, uuid_string):
+    def validate_uuid(self, uuid_string):
         """
-        Check that the UUID string is in fact a valid uuid4.
+        Check that the UUID string is in fact a valid uuid.
         """
         return self.uuid_valid_form_regex.match(uuid_string) is not None
 
@@ -1151,6 +1153,15 @@ class Versionable(models.Model):
     def as_of(self, time):
         self._querytime = QueryTime(time=time, active=True)
 
+    @staticmethod
+    def uuid():
+        """
+        Gets a new uuid string that is valid to use for id and identity fields.
+
+        :return: unicode uuid string
+        """
+        return six.u(str(uuid.uuid4()))
+
     def _clone_at(self, timestamp):
         """
         WARNING: This method is only for internal use, it should not be used
@@ -1193,7 +1204,7 @@ class Versionable(models.Model):
         # set earlier_version's ID to a new UUID so the clone (later_version) can
         # get the old one -- this allows 'head' to always have the original
         # id allowing us to get at all historic foreign key relationships
-        earlier_version.id = six.u(str(uuid.uuid4()))
+        earlier_version.id = self.uuid()
         earlier_version.version_end_date = forced_version_date
 
         if not in_bulk:
@@ -1313,7 +1324,7 @@ class Versionable(models.Model):
                     except ValueError as e:
                         raise ForeignKeyRequiresValueError(e.args[0])
 
-        self.id = six.u(str(uuid.uuid4()))
+        self.id = self.uuid()
 
         with transaction.atomic():
             if latest:
@@ -1349,7 +1360,7 @@ class Versionable(models.Model):
 
         :return: Versionable
         """
-        self.id = self.identity = six.u(str(uuid.uuid4()))
+        self.id = self.identity = self.uuid()
         self.version_start_date = self.version_birth_date = get_utc_now()
         self.version_end_date = None
         return self
@@ -1387,7 +1398,7 @@ class VersionedManyToManyModel(object):
         :return: None
         """
         if isinstance(instance, sender) and isinstance(instance, Versionable):
-            ident = six.u(str(uuid.uuid4()))
+            ident = Versionable.uuid()
             now = get_utc_now()
             if not hasattr(instance, 'version_start_date') or instance.version_start_date is None:
                 instance.version_start_date = now
