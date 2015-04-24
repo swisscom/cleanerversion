@@ -215,6 +215,19 @@ class DeletionHandlerTest(TestCase):
         self.assertEqual(1, Team.objects.current.filter(pk=self.team.pk).count())
         self.assertEqual(1, City.objects.current.filter(pk=self.city.pk).count())
 
+    def test_deleting_when_m2m_history(self):
+        through = Award._meta.get_field_by_name('players')[0].rel.through
+        a1 = Award.objects.create(name="bravo")
+        p1 = Player.objects.create(name="Jessie")
+        a1.players = [p1]
+        self.assertEqual(1, through.objects.filter(player_id=p1.pk).count())
+        self.assertEqual(1, through.objects.current.filter(player_id=p1.pk).count())
+        a1.players = []
+        self.assertEqual(1, through.objects.filter(player_id=p1.pk).count())
+        self.assertEqual(0, through.objects.current.filter(player_id=p1.pk).count())
+        p1.delete()
+        self.assertEqual(1, through.objects.filter(player_id=p1.pk).count())
+        self.assertEqual(0, through.objects.current.filter(player_id=p1.pk).count())
 
 class CurrentVersionTest(TestCase):
     def setUp(self):

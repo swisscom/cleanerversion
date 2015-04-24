@@ -106,3 +106,12 @@ class VersionedCollector(Collector):
                     setattr(instance, 'version_end_date', timestamp)
                 else:
                     setattr(instance, model._meta.pk.attname, None)
+
+    def related_objects(self, related, objs):
+        """
+        Gets a QuerySet of current objects related to ``objs`` via the relation ``related``.
+
+        """
+        return related.model._base_manager.current.using(self.using).filter(
+            **{"%s__in" % related.field.name: objs}
+        )
