@@ -22,9 +22,9 @@ SECRET_KEY = get_random_string(50, chars)
 DEBUG = True
 TEMPLATE_DEBUG = True
 
-ALLOWED_HOSTS = []
 
-MIDDLEWARE_CLASSES = ()
+
+ALLOWED_HOSTS = []
 
 # Database
 # https://docs.djangoproject.com/en/dev/ref/settings/#databases
@@ -57,7 +57,24 @@ DATABASES = {
 
 # Application definition
 INSTALLED_APPS = (
-    'versions_tests',
+    'django.contrib.admin',
+    'django.contrib.auth',
+    'django.contrib.contenttypes',
+    'django.contrib.sessions',
+    'django.contrib.messages',
+    'django.contrib.staticfiles',
+    'TestCase',
+)
+
+MIDDLEWARE_CLASSES = (
+    'django.contrib.sessions.middleware.SessionMiddleware',
+    'django.middleware.common.CommonMiddleware',
+    'django.middleware.csrf.CsrfViewMiddleware',
+    'django.contrib.auth.middleware.AuthenticationMiddleware',
+    'django.contrib.auth.middleware.SessionAuthenticationMiddleware',
+    'django.contrib.messages.middleware.MessageMiddleware',
+    'django.middleware.clickjacking.XFrameOptionsMiddleware',
+    'django.middleware.security.SecurityMiddleware',
 )
 
 # Internationalization
@@ -67,3 +84,9 @@ TIME_ZONE = 'UTC'
 USE_I18N = True
 USE_L10N = True
 USE_TZ = True
+
+
+ROOT_URLCONF = 'TestCase.urls'
+
+
+STATIC_URL = '/static/'
