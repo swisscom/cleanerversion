@@ -23,8 +23,9 @@ class VersionableAdmin(ModelAdmin):
 
     def get_list_display(self, request):
         """this method determines which fields go in the changelist"""
-        f = list(super(VersionableAdmin,self).get_list_display(request))
-        return f + ['is_current']
+        list_display = super(VersionableAdmin,self).get_list_display(request)
+        #force cast to list as super get_list_display could return a tuple
+        return list(list_display) + ['is_current']
 
 
     def save_model(self, request, obj, form, change):
@@ -41,3 +42,4 @@ class VersionableAdmin(ModelAdmin):
         return obj.is_current
 
     is_current.boolean = True
+    is_current.short_description = "Current"
