@@ -14,6 +14,7 @@ class VersionableAdmin(ModelAdmin):
     list_display_show_identity = True
     list_display_show_end_date = True
     list_display_show_start_date = True
+    ordering = []
 
     def get_readonly_fields(self, request, obj=None):
         """this method is needed so that if a subclass of VersionableAdmin has readonly_fields the
@@ -22,7 +23,8 @@ class VersionableAdmin(ModelAdmin):
             return self.readonly_fields + ('id','identity','is_current')
         return self.readonly_fields
 
-
+    def get_ordering(self, request):
+        return ['identity', '-version_start_date'] + self.ordering
 
     def get_list_display(self, request):
         """this method determines which fields go in the changelist"""
@@ -60,7 +62,7 @@ class VersionableAdmin(ModelAdmin):
     is_current.short_description = "Current"
 
     def identity_shortener(self,obj):
-        return obj.identity[:7]
+        return "..."+obj.identity[-12:]
 
     identity_shortener.boolean = False
-    identity_shortener.short_discription = "Short Identity"
+    identity_shortener.short_description = "Short Identity"
