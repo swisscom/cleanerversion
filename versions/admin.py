@@ -11,8 +11,9 @@ from django.forms import ModelForm
 
 class VersionableAdmin(ModelAdmin):
     readonly_fields = ('id','identity')
-
-
+    list_display_show_identity = True
+    list_display_show_end_date = True
+    list_display_show_start_date = True
 
     def get_readonly_fields(self, request, obj=None):
         """this method is needed so that if a subclass of VersionableAdmin has readonly_fields the
@@ -21,9 +22,23 @@ class VersionableAdmin(ModelAdmin):
             return self.readonly_fields + ('id','identity','is_current')
         return self.readonly_fields
 
+
+
     def get_list_display(self, request):
         """this method determines which fields go in the changelist"""
-        list_display = super(VersionableAdmin,self).get_list_display(request)
+        if self.list_display_show_identity:
+            list_display = ['identity_shortener']
+        else:
+            list_display = []
+
+        list_display += super(VersionableAdmin,self).get_list_display(request)
+
+        if self.list_display_show_start_date:
+            list_display += ['version_start_date']
+
+        if self.list_display_show_end_date:
+            list_display += ['version_end_date']
+
         #force cast to list as super get_list_display could return a tuple
         return list(list_display) + ['is_current']
 
@@ -43,3 +58,9 @@ class VersionableAdmin(ModelAdmin):
 
     is_current.boolean = True
     is_current.short_description = "Current"
+
+    def identity_shortener(self,obj):
+        return obj.identity[:7]
+
+    identity_shortener.boolean = False
+    identity_shortener.short_discription = "Short Identity"
