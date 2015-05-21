@@ -1,6 +1,14 @@
 from django.contrib.admin import ModelAdmin
-from django.forms.models import modelform_factory
+from django.contrib.admin.checks import ModelAdminChecks
 
+
+
+
+    #necessary right now because of the error about exclude not being a tuple since we are using @property to dynamicall
+    #change it
+class VAdminChecks(ModelAdminChecks):
+    def _check_exclude(self, cls, model):
+        return []
 
 
 
@@ -15,6 +23,7 @@ class VersionableAdmin(ModelAdmin):
     list_display_show_end_date = True
     list_display_show_start_date = True
     ordering = []
+    checks_class = VAdminChecks
 
     def get_readonly_fields(self, request, obj=None):
         """this method is needed so that if a subclass of VersionableAdmin has readonly_fields the
