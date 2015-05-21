@@ -28,7 +28,9 @@ class VersionedCollector(Collector):
         with transaction.commit_on_success_unless_managed(using=self.using):
             # send pre_delete signals, but not for versionables
             for model, obj in self.instances_with_model():
-                if not (self.is_versionable(model) or model._meta.auto_created):
+                if self.is_versionable(model):
+                    self.versionable_pre_delete(obj, timestamp)
+                elif not model._meta.auto_created:
                     signals.pre_delete.send(
                         sender=model, instance=obj, using=self.using
                     )
@@ -78,8 +80,8 @@ class VersionedCollector(Collector):
             for model, instances in six.iteritems(self.data):
                 if self.is_versionable(model):
                     for instance in instances:
-                        instance._delete_at(timestamp, using=self.using)
-                    # do not send post_delete signals
+                        self.versionable_delete(instance, timestamp)
+                        self.versionable_post_delete(instance, timestamp)
                 else:
                     query = sql.DeleteQuery(model)
                     pk_list = [obj.pk for obj in instances]
@@ -115,3 +117,32 @@ class VersionedCollector(Collector):
         return related.model._base_manager.current.using(self.using).filter(
             **{"%s__in" % related.field.name: objs}
         )
+
+    def versionable_pre_delete(self, instance, timestamp):
+        """
+        Override this method to implement custom behaviour.  By default, does nothing.
+
+        :param Versionable instance:
+        :param datetime timestamp:
+        """
+        pass
+
+    def versionable_post_delete(self, instance, timestamp):
+        """
+        Override this method to implement custom behaviour.  By default, does nothing.
+
+        :param Versionable instance:
+        :param datetime timestamp:
+        """
+        pass
+
+    def versionable_delete(self, instance, timestamp):
+        """
+        Soft-deletes the instance, setting it's version_end_date to timestamp.
+
+        Override this method to implement custom behaviour.
+
+        :param Versionable instance:
+        :param datetime timestamp:
+        """
+        instance._delete_at(timestamp, using=self.using)
