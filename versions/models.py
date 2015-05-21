@@ -41,6 +41,7 @@ from django.utils import six
 from django.db import models, router
 
 from versions import settings as versions_settings
+from versions.exceptions import DeletionOfNonCurrentVersionError
 
 
 def get_utc_now():
@@ -538,6 +539,34 @@ class VersionedQuerySet(QuerySet):
         clone = self._clone()
         clone.querytime = QueryTime(time=qtime, active=True)
         return clone
+
+    def delete(self):
+        """
+        Deletes the records in the QuerySet.
+        """
+        assert self.query.can_filter(), \
+            "Cannot use 'limit' or 'offset' with delete."
+
+        del_query = self._clone()
+
+        # The delete is actually 2 queries - one to find related objects,
+        # and one to delete. Make sure that the discovery of related
+        # objects is performed on the same database as the deletion.
+        del_query._for_write = True
+
+        # Disable non-supported fields.
+        del_query.query.select_for_update = False
+        del_query.query.select_related = False
+        del_query.query.clear_ordering(force_empty=True)
+
+        collector = versions_settings.VERSIONED_DELETE_COLLECTOR_CLASS(using=del_query.db)
+        collector.collect(del_query)
+        collector.delete(get_utc_now())
+
+        # Clear the result cache, in case this QuerySet gets reused.
+        self._result_cache = None
+    delete.alters_data = True
+    delete.queryset_only = True
 
 
 class VersionedForeignKey(ForeignKey):
@@ -1094,7 +1123,9 @@ class Versionable(models.Model):
 
     def delete(self, using=None):
         using = using or router.db_for_write(self.__class__, instance=self)
-        assert self._get_pk_val() is not None, "%s object can't be deleted because its %s attribute is set to None." % (self._meta.object_name, self._meta.pk.attname)
+        assert self._get_pk_val() is not None, \
+            "{} object can't be deleted because its {} attribute is set to None.".format(
+                self._meta.object_name, self._meta.pk.attname)
 
         collector = versions_settings.VERSIONED_DELETE_COLLECTOR_CLASS(using=using)
         collector.collect([self])
@@ -1115,7 +1146,7 @@ class Versionable(models.Model):
             self.version_end_date = timestamp
             self.save(force_update=True, using=using)
         else:
-            raise Exception('Cannot delete anything else but the current version')
+            raise DeletionOfNonCurrentVersionError('Cannot delete anything else but the current version')
 
     @property
     def is_current(self):

@@ -28,6 +28,7 @@ from django.test import TestCase
 from django.utils.timezone import utc
 from django.utils import six
 
+from versions.exceptions import DeletionOfNonCurrentVersionError
 from versions.models import get_utc_now, ForeignKeyRequiresValueError, Versionable
 from versions_tests.models import (
     Award, B, C1, C2, C3, City, Classroom, Directory, Fan, Mascot, NonFan, Observer, Person, Player, Professor, Pupil,
@@ -139,10 +140,44 @@ class DeletionTest(TestCase):
         current = B.objects.current.first()
         previous = B.objects.previous_version(current)
 
-        self.assertRaises(Exception, previous.delete)
+        self.assertRaises(DeletionOfNonCurrentVersionError, previous.delete)
+
+    def test_delete_using_current_queryset(self):
+        B.objects.current.all().delete()
+        bs = list(B.objects.all())
+        self.assertEqual(3, len(bs))
+        for b in bs:
+            self.assertIsNotNone(b.version_end_date)
+
+    def test_delete_using_non_current_queryset(self):
+
+        B.objects.create(name='Buzz')
+
+        qs = B.objects.all().filter(version_end_date__isnull=True)
+        self.assertEqual(2, len(qs))
+        pks = [o.pk for o in qs]
+
+        qs.delete()
+        bs = list(B.objects.all().filter(pk__in=pks))
+        self.assertEqual(2, len(bs))
+        for b in bs:
+            self.assertIsNotNone(b.version_end_date)
+
+    def test_deleteing_non_current_version_with_queryset(self):
+        qs = B.objects.all().filter(version_end_date__isnull=False)
+        self.assertEqual(2, qs.count())
+
+        # Use transation.atomic here to avoid the subsequent query from failing because an Exception occurred.
+        # After all, we're expecting the exception.
+        with transaction.atomic():
+            self.assertRaises(DeletionOfNonCurrentVersionError, qs.delete)
+
+        self.assertEqual(2, qs.count())
 
 
 class DeletionHandlerTest(TestCase):
+    """Tests that the ForeignKey on_delete parameters have the expected effects"""
+
     def setUp(self):
         self.city = City.objects.create(name='c.v1')
         self.team = Team.objects.create(name='t.v1', city=self.city)
