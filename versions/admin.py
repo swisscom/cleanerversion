@@ -1,5 +1,5 @@
 from django.contrib.admin import ModelAdmin
-from django.forms import ModelForm
+from django.forms.models import modelform_factory
 
 
 
@@ -44,16 +44,20 @@ class VersionableAdmin(ModelAdmin):
         #force cast to list as super get_list_display could return a tuple
         return list(list_display) + ['is_current']
 
+    @property
+    def exclude(self):
+        """need a getter for exclude since there is no get_exclude method to be overridden"""
+        VERSIONABLE_EXCLUDE = ['id', 'identity', 'version_end_date', 'version_start_date', 'version_birth_date']
+        if self.exclude is None:
+            return VERSIONABLE_EXCLUDE
+        else:
+            return list(self.exclude) + VERSIONABLE_EXCLUDE
 
-    def save_model(self, request, obj, form, change):
-        """this method adds ability for cleanerversion objects to be added and updated from Admin"""
-        if change:
-            newer_object = obj.clone().clone()
-            form.is_valid()
-            newer_object.name = form.cleaned_data["name"]
-            newer_object.age = form.cleaned_data['age']
-            newer_object.save()
-
+    def get_form(self, request, obj=None, **kwargs):
+        if request.method == 'POST' and obj is not None:
+            obj = obj.clone()
+        form = super(VersionableAdmin,self).get_form(request,obj,**kwargs)
+        return form
 
     def is_current(self, obj):
         return obj.is_current
