@@ -19,10 +19,13 @@ class VAdminChecks(ModelAdminChecks):
 
 class VersionableAdmin(ModelAdmin):
     readonly_fields = ('id','identity')
+    #these are so that the subclasses can overwrite these attributes
+    # to have the identity, end date,or start date column not show
     list_display_show_identity = True
     list_display_show_end_date = True
     list_display_show_start_date = True
     ordering = []
+    #new attribute for working with self.exclude method so that the subclass can specify more fields to exclude
     _exclude = None
     checks_class = VAdminChecks
 
