@@ -62,16 +62,21 @@ class VersionableAdmin(ModelAdmin):
         """need a getter for exclude since there is no get_exclude method to be overridden"""
         VERSIONABLE_EXCLUDE = ['id', 'identity', 'version_end_date', 'version_start_date', 'version_birth_date']
         #creating _exclude so that self.exclude doesn't need to be called prompting recursion, and subclasses
-        #hava way to change what is excluded
+        #have a way to change what is excluded
         if self._exclude is None:
             return VERSIONABLE_EXCLUDE
         else:
             return list(self._exclude) + VERSIONABLE_EXCLUDE
 
     def get_form(self, request, obj=None, **kwargs):
+
+        form = super(VersionableAdmin,self).get_form(request,obj,**kwargs)
+
         if request.method == 'POST' and obj is not None:
             obj = obj.clone()
-        form = super(VersionableAdmin,self).get_form(request,obj,**kwargs)
+            print "It was cloned"
+            #this is printing out twice for some reason and we get two instances of each object
+
         return form
 
     def is_current(self, obj):
