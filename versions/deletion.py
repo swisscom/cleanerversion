@@ -7,6 +7,22 @@ import versions.models
 
 
 class VersionedCollector(Collector):
+    """
+    A Collector that can be used to collect and delete Versionable objects.
+    The delete operation for Versionable objects is Versionable._delete_at,
+    which does not delete the record, it updates it's version_end_date to be
+    the timestamp passed to the delete() method.
+
+    Since non-versionable and versionable objects can be related, the delete()
+    method handles both of them.  The standard Django behaviour is kept for
+    non-versionable objects.  For versionable objects, no pre/post-delete signals
+    are sent.  No signal is sent because the object is not being removed from the
+    database.  If you want the standard signals to be sent, or custom signals,
+    create a subclass of this class and override versionable_pre_delete() and/or
+    versionable_post_delete(), and in your settings file specify the dotted path
+    to your custom class as a string, e.g.:
+    VERSIONED_DELETE_COLLECTOR_CLASS = 'myapp.deletion.CustomVersionedCollector'
+    """
 
     def can_fast_delete(self, objs, from_field=None):
         """Do not fast delete anything"""
@@ -28,10 +44,14 @@ class VersionedCollector(Collector):
         with transaction.commit_on_success_unless_managed(using=self.using):
             # send pre_delete signals, but not for versionables
             for model, obj in self.instances_with_model():
-                if not (self.is_versionable(model) or model._meta.auto_created):
-                    signals.pre_delete.send(
-                        sender=model, instance=obj, using=self.using
-                    )
+                if not model._meta.auto_created:
+                    if self.is_versionable(model):
+                        # By default, no signal is sent when deleting a Versionable.
+                        self.versionable_pre_delete(obj, timestamp)
+                    else:
+                        signals.pre_delete.send(
+                            sender=model, instance=obj, using=self.using
+                        )
 
             # do not do fast deletes
             if self.fast_deletes:
@@ -78,8 +98,10 @@ class VersionedCollector(Collector):
             for model, instances in six.iteritems(self.data):
                 if self.is_versionable(model):
                     for instance in instances:
-                        instance._delete_at(timestamp, using=self.using)
-                    # do not send post_delete signals
+                        self.versionable_delete(instance, timestamp)
+                        if not model._meta.auto_created:
+                            # By default, no signal is sent when deleting a Versionable.
+                            self.versionable_post_delete(instance, timestamp)
                 else:
                     query = sql.DeleteQuery(model)
                     pk_list = [obj.pk for obj in instances]
@@ -115,3 +137,32 @@ class VersionedCollector(Collector):
         return related.model._base_manager.current.using(self.using).filter(
             **{"%s__in" % related.field.name: objs}
         )
+
+    def versionable_pre_delete(self, instance, timestamp):
+        """
+        Override this method to implement custom behaviour.  By default, does nothing.
+
+        :param Versionable instance:
+        :param datetime timestamp:
+        """
+        pass
+
+    def versionable_post_delete(self, instance, timestamp):
+        """
+        Override this method to implement custom behaviour.  By default, does nothing.
+
+        :param Versionable instance:
+        :param datetime timestamp:
+        """
+        pass
+
+    def versionable_delete(self, instance, timestamp):
+        """
+        Soft-deletes the instance, setting it's version_end_date to timestamp.
+
+        Override this method to implement custom behaviour.
+
+        :param Versionable instance:
+        :param datetime timestamp:
+        """
+        instance._delete_at(timestamp, using=self.using)
