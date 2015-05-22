@@ -166,13 +166,12 @@ class DeletionTest(TestCase):
     def test_deleteing_non_current_version_with_queryset(self):
         qs = B.objects.all().filter(version_end_date__isnull=False)
         self.assertEqual(2, qs.count())
+        pks = [o.pk for o in qs]
 
-        # Use transation.atomic here to avoid the subsequent query from failing because an Exception occurred.
-        # After all, we're expecting the exception.
-        with transaction.atomic():
-            self.assertRaises(DeletionOfNonCurrentVersionError, qs.delete)
+        B.objects.all().filter(pk__in=pks).delete()
 
-        self.assertEqual(2, qs.count())
+        # None of the objects should have been deleted, because they are not current.
+        self.assertEqual(2, B.objects.all().filter(pk__in=pks).count())
 
 
 class DeletionHandlerTest(TestCase):

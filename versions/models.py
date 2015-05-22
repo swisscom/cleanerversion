@@ -547,7 +547,8 @@ class VersionedQuerySet(QuerySet):
         assert self.query.can_filter(), \
             "Cannot use 'limit' or 'offset' with delete."
 
-        del_query = self._clone()
+        # Ensure that only current objects are selected.
+        del_query = self.filter(version_end_date__isnull=True)
 
         # The delete is actually 2 queries - one to find related objects,
         # and one to delete. Make sure that the discovery of related
