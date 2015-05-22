@@ -23,6 +23,7 @@ class VersionableAdmin(ModelAdmin):
     list_display_show_end_date = True
     list_display_show_start_date = True
     ordering = []
+    _exclude = None
     checks_class = VAdminChecks
 
     def get_readonly_fields(self, request, obj=None):
@@ -57,10 +58,12 @@ class VersionableAdmin(ModelAdmin):
     def exclude(self):
         """need a getter for exclude since there is no get_exclude method to be overridden"""
         VERSIONABLE_EXCLUDE = ['id', 'identity', 'version_end_date', 'version_start_date', 'version_birth_date']
-        if self.exclude is None:
+        #creating _exclude so that self.exclude doesn't need to be called prompting recursion, and subclasses
+        #hava way to change what is excluded
+        if self._exclude is None:
             return VERSIONABLE_EXCLUDE
         else:
-            return list(self.exclude) + VERSIONABLE_EXCLUDE
+            return list(self._exclude) + VERSIONABLE_EXCLUDE
 
     def get_form(self, request, obj=None, **kwargs):
         if request.method == 'POST' and obj is not None:
