@@ -41,12 +41,12 @@ class VersionableAdmin(ModelAdmin):
 
     def get_list_display(self, request):
         """this method determines which fields go in the changelist"""
-        if self.list_display_show_identity:
-            list_display = ['identity_shortener']
-        else:
-            list_display = []
 
-        list_display += super(VersionableAdmin,self).get_list_display(request)
+        list_display = super(VersionableAdmin,self).get_list_display(request)
+        #force cast to list as super get_list_display could return a tuple
+        list_display = list(list_display)
+        if self.list_display_show_identity:
+            list_display = ['identity_shortener'] + list_display
 
         if self.list_display_show_start_date:
             list_display += ['version_start_date']
@@ -54,8 +54,7 @@ class VersionableAdmin(ModelAdmin):
         if self.list_display_show_end_date:
             list_display += ['version_end_date']
 
-        #force cast to list as super get_list_display could return a tuple
-        return list(list_display) + ['is_current']
+        return list_display + ['is_current']
 
     @property
     def exclude(self):
