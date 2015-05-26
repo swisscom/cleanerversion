@@ -68,16 +68,14 @@ class VersionableAdmin(ModelAdmin):
         else:
             return list(self._exclude) + VERSIONABLE_EXCLUDE
 
-    def get_form(self, request, obj=None, **kwargs):
 
-        form = super(VersionableAdmin,self).get_form(request,obj,**kwargs)
-
-        if request.method == 'POST' and obj is not None:
+    def get_object(self, request, object_id, from_field=None):
+        obj = super(VersionableAdmin, self).get_object(request, object_id, from_field)
+        #the things tested for in the if are for Updating an object; get_object is called three times: changeview, delete, and history
+        if request.method == "POST" and obj and obj.is_latest:
             obj = obj.clone()
-            print "It was cloned"
-            #this is printing out twice for some reason and we get two instances of each object
 
-        return form
+        return obj
 
     def is_current(self, obj):
         return obj.is_current
