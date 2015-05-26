@@ -81,6 +81,14 @@ class PostgresqlVersionUniqueTests(TransactionTestCase):
             door_color = sb4.door_color
         )
 
+    def test_identity_unique(self):
+        c = Color.objects.create(name='sky blue')
+        c.identity = self.green.identity
+
+        # It should not be possible to have two "current" objects with the same identity:
+        with self.assertRaises(IntegrityError):
+            c.save()
+
 
 @skipUnless(AT_LEAST_17 and connection.vendor == 'postgresql', "Postgresql-specific test")
 class PostgresqlUuidLikeIndexesTest(TestCase):
