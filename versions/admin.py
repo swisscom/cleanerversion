@@ -18,7 +18,7 @@ class VAdminChecks(ModelAdminChecks):
 
 
 
-class VersionableAdmin(admin.ModelAdmin):
+class VersionedAdmin(admin.ModelAdmin):
     readonly_fields = ('id','identity')
     actions = ['delete_model']
     #these are so that the subclasses can overwrite these attributes
@@ -32,7 +32,7 @@ class VersionableAdmin(admin.ModelAdmin):
     checks_class = VAdminChecks
 
     def get_readonly_fields(self, request, obj=None):
-        """this method is needed so that if a subclass of VersionableAdmin has readonly_fields the
+        """this method is needed so that if a subclass of VersionedAdmin has readonly_fields the
                 the ones written above won't be undone"""
         if obj:
             return self.readonly_fields + ('id','identity','is_current')
@@ -44,7 +44,7 @@ class VersionableAdmin(admin.ModelAdmin):
     def get_list_display(self, request):
         """this method determines which fields go in the changelist"""
 
-        list_display = super(VersionableAdmin,self).get_list_display(request)
+        list_display = super(VersionedAdmin,self).get_list_display(request)
         #force cast to list as super get_list_display could return a tuple
         list_display = list(list_display)
         if self.list_display_show_identity:
@@ -61,17 +61,17 @@ class VersionableAdmin(admin.ModelAdmin):
     @property
     def exclude(self):
         """need a getter for exclude since there is no get_exclude method to be overridden"""
-        VERSIONABLE_EXCLUDE = ['id', 'identity', 'version_end_date', 'version_start_date', 'version_birth_date']
+        VERSIONED_EXCLUDE = ['id', 'identity', 'version_end_date', 'version_start_date', 'version_birth_date']
         #creating _exclude so that self.exclude doesn't need to be called prompting recursion, and subclasses
         #have a way to change what is excluded
         if self._exclude is None:
-            return VERSIONABLE_EXCLUDE
+            return VERSIONED_EXCLUDE
         else:
-            return list(self._exclude) + VERSIONABLE_EXCLUDE
+            return list(self._exclude) + VERSIONED_EXCLUDE
 
 
     def get_object(self, request, object_id, from_field=None):
-        obj = super(VersionableAdmin, self).get_object(request, object_id) #from_field breaks in 1.7.8
+        obj = super(VersionedAdmin, self).get_object(request, object_id) #from_field breaks in 1.7.8
         #the things tested for in the if are for Updating an object; get_object is called three times: changeview, delete, and history
         if request.method == "POST" and obj and obj.is_latest and not 'delete' in request.path:
             obj = obj.clone()
