@@ -14,18 +14,6 @@ class VAdminChecks(ModelAdminChecks):
 
 
 
-class FilterAsOf(admin.SimpleListFilter):
-    """This provides as_of with the datepicker functionality to listing objects"""
-    title = ('as_of',)
-
-    parameter_name = 'as_of'
-
-    def lookups(self, request, model_admin):
-        return [('as_of','as_of Date')]
-
-    def queryset(self, request, queryset):
-        return queryset.as_of(self.value())
-
 
 
 
@@ -70,11 +58,6 @@ class VersionedAdmin(admin.ModelAdmin):
         return list_display + ['is_current']
 
 
-    def get_list_filter(self, request):
-        list_filter = super(VersionedAdmin, self).get_list_filter(request)
-        list_filter += (FilterAsOf,)
-        return list_filter
-
 
 
 
@@ -104,8 +87,9 @@ class VersionedAdmin(admin.ModelAdmin):
         for object in queryset:
             object.delete()'''
 
-
-
+    def get_list_filter(self, request):
+        list_filter = super(VersionedAdmin,self).get_list_filter(request)
+        return list_filter + (DateTimeFilter,)
 
     def is_current(self, obj):
         return obj.is_current
@@ -159,4 +143,21 @@ class DateTimeFilter(admin.filters.FieldListFilter):
 
     def __init__(self, field, request, params, model, model_admin, field_path):
         super(DateTimeFilter, self).__init__(field, request, params, model, model_admin, field_path)
-        self.as_of
+        self.lookup_kwarg_as_of = '%s.as_of' % field_path
+        self.form = self.get_form(request)
+
+
+    def get_form(self, request):
+        return DateTimeForm(request, data=self.used_parameters,
+                             field_name=self.field_path)
+
+    def queryset(self, request, queryset):
+        if self.form.is_valid():
+            filter_params = dict(filter(lambda x: bool(x[1]),
+                                        self.form.cleaned_data.items()))
+
+            return queryset.as_of(**filter_params)
+        else:
+            return queryset
+
+
