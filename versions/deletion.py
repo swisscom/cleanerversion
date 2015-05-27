@@ -1,3 +1,4 @@
+from django import VERSION
 from django.db.models.deletion import (
     attrgetter, signals, six, sql, transaction,
     CASCADE,
@@ -134,7 +135,11 @@ class VersionedCollector(Collector):
         Gets a QuerySet of current objects related to ``objs`` via the relation ``related``.
 
         """
-        return related.model._base_manager.current.using(self.using).filter(
+        if VERSION >= (1, 8):
+            related_model = related.related_model
+        else:
+            related_model = related.model
+        return related_model._base_manager.current.using(self.using).filter(
             **{"%s__in" % related.field.name: objs}
         )
 
