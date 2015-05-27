@@ -1,8 +1,9 @@
-from django.contrib.admin import ModelAdmin
+
 from django.contrib.admin.checks import ModelAdminChecks
+from django.contrib import admin
 
 
-
+admin.site.disable_action('delete_selected')
 
     #necessary right now because of the error about exclude not being a tuple since we are using @property to dynamicall
     #change it
@@ -17,8 +18,9 @@ class VAdminChecks(ModelAdminChecks):
 
 
 
-class VersionableAdmin(ModelAdmin):
+class VersionableAdmin(admin.ModelAdmin):
     readonly_fields = ('id','identity')
+    actions = ['delete_model']
     #these are so that the subclasses can overwrite these attributes
     # to have the identity, end date,or start date column not show
     list_display_show_identity = True
@@ -75,6 +77,11 @@ class VersionableAdmin(ModelAdmin):
             obj = obj.clone()
 
         return obj
+
+    def delete_model(self, request, queryset):
+        """needed for bulk 'delete' of versionable objects"""
+        for object in queryset:
+            object.delete()
 
 
 
