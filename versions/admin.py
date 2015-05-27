@@ -19,7 +19,6 @@ class VAdminChecks(ModelAdminChecks):
 
 
 class VersionedAdmin(admin.ModelAdmin):
-    readonly_fields = ('id','identity')
     actions = ['delete_model']
     #these are so that the subclasses can overwrite these attributes
     # to have the identity, end date,or start date column not show
