@@ -795,7 +795,7 @@ class VersionedForeignRelatedObjectsDescriptor(ForeignRelatedObjectsDescriptor):
 
                 # This is a hack, in order to get the versioned related objects
                 for key in self.core_filters.keys():
-                    if '__exact' in key:
+                    if '__exact' in key or '__' not in key:
                         self.core_filters[key] = instance.identity
 
             def get_queryset(self):
