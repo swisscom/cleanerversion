@@ -1,9 +1,10 @@
-
+from django.contrib.admin.widgets import AdminDateWidget
 from django.contrib.admin.checks import ModelAdminChecks
 from django.contrib import admin
+from django import forms
+from django.contrib.admin.templatetags.admin_static import static
 
-
-admin.site.disable_action('delete_selected')
+#admin.site.disable_action('delete_selected')
 
     #necessary right now because of the error about exclude not being a tuple since we are using @property to dynamicall
     #change it
@@ -13,13 +14,23 @@ class VAdminChecks(ModelAdminChecks):
 
 
 
+class FilterAsOf(admin.SimpleListFilter):
+    """This provides as_of with the datepicker functionality to listing objects"""
+    title = ('as_of',)
 
+    parameter_name = 'as_of'
+
+    def lookups(self, request, model_admin):
+        return [('as_of','as_of Date')]
+
+    def queryset(self, request, queryset):
+        return queryset.as_of(self.value())
 
 
 
 
 class VersionedAdmin(admin.ModelAdmin):
-    actions = ['delete_model']
+    #actions = ['delete_model']
     #these are so that the subclasses can overwrite these attributes
     # to have the identity, end date,or start date column not show
     list_display_show_identity = True
@@ -29,6 +40,7 @@ class VersionedAdmin(admin.ModelAdmin):
     #new attribute for working with self.exclude method so that the subclass can specify more fields to exclude
     _exclude = None
     checks_class = VAdminChecks
+
 
     def get_readonly_fields(self, request, obj=None):
         """this method is needed so that if a subclass of VersionedAdmin has readonly_fields the
@@ -57,6 +69,16 @@ class VersionedAdmin(admin.ModelAdmin):
 
         return list_display + ['is_current']
 
+
+    def get_list_filter(self, request):
+        list_filter = super(VersionedAdmin, self).get_list_filter(request)
+        list_filter += (FilterAsOf,)
+        return list_filter
+
+
+
+
+
     @property
     def exclude(self):
         """need a getter for exclude since there is no get_exclude method to be overridden"""
@@ -77,10 +99,10 @@ class VersionedAdmin(admin.ModelAdmin):
 
         return obj
 
-    def delete_model(self, request, queryset):
+    '''def delete_model(self, request, queryset):
         """needed for bulk 'delete' of versionable objects"""
         for object in queryset:
-            object.delete()
+            object.delete()'''
 
 
 
@@ -96,3 +118,45 @@ class VersionedAdmin(admin.ModelAdmin):
 
     identity_shortener.boolean = False
     identity_shortener.short_description = "Short Identity"
+
+
+
+
+class DateTimeForm(forms.Form):
+    def __init__(self, request, *args, **kwargs):
+        field_name = kwargs.pop('field_name')
+        super(DateTimeForm, self).__init__(*args, **kwargs)
+        self.request = request
+        self.fields['%s.as_of' % field_name] = forms.DateField(
+            label='',
+            widget=AdminDateWidget(
+                attrs={'placeholder': ('as of date and time')}
+            ),
+            localize=True,
+            required=False
+        )
+
+
+    @property
+    def media(self):
+        try:
+            if getattr(self.request, 'daterange_filter_media_included'):
+                return forms.Media()
+        except AttributeError:
+            setattr(self.request, 'daterange_filter_media_included', True)
+
+            js = ["calendar.js", "admin/DateTimeShortcuts.js"]
+            css = ['widgets.css']
+
+            return forms.Media(
+                js=[static("admin/js/%s" % path) for path in js],
+                css={'all': [static("admin/css/%s" % path) for path in css]}
+            )
+
+
+class DateTimeFilter(admin.filters.FieldListFilter):
+    template = 'versions/templates/datetimefilter.html'
+
+    def __init__(self, field, request, params, model, model_admin, field_path):
+        super(DateTimeFilter, self).__init__(field, request, params, model, model_admin, field_path)
+        self.as_of

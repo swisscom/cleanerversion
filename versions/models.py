@@ -539,6 +539,34 @@ class VersionedQuerySet(QuerySet):
         clone.querytime = QueryTime(time=qtime, active=True)
         return clone
 
+    def delete(self):
+        """
+        Deletes the records in the current VersionedQuerySet.
+        """
+        assert self.query.can_filter(), \
+            "Cannot use 'limit' or 'offset' with delete."
+
+        del_query = self._clone()
+
+        # The delete is actually 2 queries - one to find related objects,
+        # and one to delete. Make sure that the discovery of related
+        # objects is performed on the same database as the deletion.
+        del_query._for_write = True
+
+        # Disable non-supported fields.
+        del_query.query.select_for_update = False
+        del_query.query.select_related = False
+        del_query.query.clear_ordering(force_empty=True)
+
+        collector = VersionedCollector(using=del_query.db)
+        collector.collect([self])
+        now = get_utc_now()
+        collector.delete(now)
+
+        # Clear the result cache, in case this QuerySet gets reused.
+        self._result_cache = None
+    delete.alters_data = True
+    delete.queryset_only = True
 
 class VersionedForeignKey(ForeignKey):
     """
