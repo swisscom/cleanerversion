@@ -69,12 +69,15 @@ class VersionableAdmin(ModelAdmin):
 
 
     def get_object(self, request, object_id, from_field=None):
-        obj = super(VersionableAdmin, self).get_object(request, object_id, from_field)
+        obj = super(VersionableAdmin, self).get_object(request, object_id) #from_field breaks in 1.7.8
         #the things tested for in the if are for Updating an object; get_object is called three times: changeview, delete, and history
-        if request.method == "POST" and obj and obj.is_latest:
+        if request.method == "POST" and obj and obj.is_latest and not 'delete' in request.path:
             obj = obj.clone()
 
         return obj
+
+
+
 
     def is_current(self, obj):
         return obj.is_current
