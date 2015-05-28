@@ -94,7 +94,7 @@ class VersionedAdmin(admin.ModelAdmin):
     #new attribute for working with self.exclude method so that the subclass can specify more fields to exclude
     _exclude = None
     checks_class = VAdminChecks
-    list_filter = (('version_start_date',DateTimeFilter),)
+
 
     def get_readonly_fields(self, request, obj=None):
         """this method is needed so that if a subclass of VersionedAdmin has readonly_fields the
@@ -123,7 +123,9 @@ class VersionedAdmin(admin.ModelAdmin):
 
         return list_display + ['is_current']
 
-
+    def get_list_filter(self, request):
+        list_filter = super(VersionedAdmin,self).get_list_filter(request)
+        return list_filter + (('version_start_date',DateTimeFilter),)
 
 
 
