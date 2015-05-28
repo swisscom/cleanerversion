@@ -63,6 +63,7 @@ INSTALLED_APPS = (
     'django.contrib.sessions',
     'django.contrib.messages',
     'django.contrib.staticfiles',
+    'versions',
     'TestCase',
 )
 
@@ -89,3 +90,4 @@ ROOT_URLCONF = 'TestCase.urls'
 
 
 STATIC_URL = '/static/'
+

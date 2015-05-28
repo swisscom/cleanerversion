@@ -1,6 +1,7 @@
-from django.contrib.admin.widgets import AdminDateWidget
+from django.contrib.admin.widgets import AdminSplitDateTime, AdminDateWidget
 from django.contrib.admin.checks import ModelAdminChecks
 from django.contrib import admin
+from django.db import models
 from django import forms
 from django.contrib.admin.templatetags.admin_static import static
 
@@ -17,6 +18,71 @@ class VAdminChecks(ModelAdminChecks):
 
 
 
+
+class DateTimeForm(forms.Form):
+    def __init__(self, request, *args, **kwargs):
+        field_name = kwargs.pop('field_name')
+        super(DateTimeForm, self).__init__(*args, **kwargs)
+        self.request = request
+        self.fields['%s_as_of' % field_name] = forms.DateTimeField(
+            label='',
+            widget=AdminDateWidget(
+                attrs={'placeholder': ('as of date and time')}
+            ),
+            localize=True,
+            required=False
+        )
+
+
+    @property
+    def media(self):
+        try:
+            if getattr(self.request, 'daterange_filter_media_included'):
+                return forms.Media()
+        except AttributeError:
+            setattr(self.request, 'daterange_filter_media_included', True)
+
+            js = ["calendar.js", "admin/DateTimeShortcuts.js"]
+            css = ['widgets.css']
+
+            return forms.Media(
+                js=[static("admin/js/%s" % path) for path in js],
+                css={'all': [static("admin/css/%s" % path) for path in css]}
+            )
+
+
+class DateTimeFilter(admin.FieldListFilter):
+    template = 'datetimefilter.html'
+
+    def __init__(self, field, request, params, model, model_admin, field_path):
+        self.lookup_kwarg_as_of = '%s_as_of' % field_path
+        super(DateTimeFilter, self).__init__(field, request, params, model, model_admin, field_path)
+        self.form = self.get_form(request)
+
+
+    def choices(self, cl):
+        return []
+
+    def expected_parameters(self):
+        return [self.lookup_kwarg_as_of]
+
+    def get_form(self, request):
+        return DateTimeForm(request, data=self.used_parameters,
+                             field_name=self.field_path)
+
+    def queryset(self, request, queryset):
+        if self.form.is_valid():
+            filter_params = self.form.cleaned_data.values()[0]
+            print filter_params,  self.form.fields
+            return queryset.as_of(filter_params)
+        #else:
+
+        return queryset
+
+admin.filters.FieldListFilter.register(
+    lambda f: isinstance(f, models.DateField), DateTimeFilter)
+
+
 class VersionedAdmin(admin.ModelAdmin):
     #actions = ['delete_model']
     #these are so that the subclasses can overwrite these attributes
@@ -28,7 +94,7 @@ class VersionedAdmin(admin.ModelAdmin):
     #new attribute for working with self.exclude method so that the subclass can specify more fields to exclude
     _exclude = None
     checks_class = VAdminChecks
-
+    list_filter = (('version_start_date',DateTimeFilter),)
 
     def get_readonly_fields(self, request, obj=None):
         """this method is needed so that if a subclass of VersionedAdmin has readonly_fields the
@@ -87,9 +153,9 @@ class VersionedAdmin(admin.ModelAdmin):
         for object in queryset:
             object.delete()'''
 
-    def get_list_filter(self, request):
+    '''def get_list_filter(self, request):
         list_filter = super(VersionedAdmin,self).get_list_filter(request)
-        return list_filter + (DateTimeFilter,)
+        return list_filter + (DateTimeFilter,)'''
 
     def is_current(self, obj):
         return obj.is_current
@@ -105,59 +171,5 @@ class VersionedAdmin(admin.ModelAdmin):
 
 
 
-
-class DateTimeForm(forms.Form):
-    def __init__(self, request, *args, **kwargs):
-        field_name = kwargs.pop('field_name')
-        super(DateTimeForm, self).__init__(*args, **kwargs)
-        self.request = request
-        self.fields['%s.as_of' % field_name] = forms.DateField(
-            label='',
-            widget=AdminDateWidget(
-                attrs={'placeholder': ('as of date and time')}
-            ),
-            localize=True,
-            required=False
-        )
-
-
-    @property
-    def media(self):
-        try:
-            if getattr(self.request, 'daterange_filter_media_included'):
-                return forms.Media()
-        except AttributeError:
-            setattr(self.request, 'daterange_filter_media_included', True)
-
-            js = ["calendar.js", "admin/DateTimeShortcuts.js"]
-            css = ['widgets.css']
-
-            return forms.Media(
-                js=[static("admin/js/%s" % path) for path in js],
-                css={'all': [static("admin/css/%s" % path) for path in css]}
-            )
-
-
-class DateTimeFilter(admin.filters.FieldListFilter):
-    template = 'versions/templates/datetimefilter.html'
-
-    def __init__(self, field, request, params, model, model_admin, field_path):
-        super(DateTimeFilter, self).__init__(field, request, params, model, model_admin, field_path)
-        self.lookup_kwarg_as_of = '%s.as_of' % field_path
-        self.form = self.get_form(request)
-
-
-    def get_form(self, request):
-        return DateTimeForm(request, data=self.used_parameters,
-                             field_name=self.field_path)
-
-    def queryset(self, request, queryset):
-        if self.form.is_valid():
-            filter_params = dict(filter(lambda x: bool(x[1]),
-                                        self.form.cleaned_data.items()))
-
-            return queryset.as_of(**filter_params)
-        else:
-            return queryset
 
 

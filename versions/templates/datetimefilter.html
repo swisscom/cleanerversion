@@ -1,0 +1,29 @@
+{% load i18n admin_static %}
+<h3>{% blocktrans with filter_title=title %} By {{ filter_title }} {% endblocktrans %}</h3>
+<style>
+    .calendarbox, .clockbox {
+        /* Make sure the calendar widget popover displays in front of the sidebar */
+        z-index: 1100;
+        margin-left: -251px;
+    }
+    .datetimeshortcuts {
+        /* Hide "|" symbol */
+        font-size: 0;
+    }
+    .datetimeshortcuts a:before{
+        /* Restore deleted spaces */
+        content: " ";
+    }
+    .datetimeshortcuts a{
+        /* Make text for "Today" a bit smaller so it appears on one line. */
+        font-size: 7pt;
+    }
+</style>
+<form method="GET" action="">
+    {{ spec.form.media }}
+    {{ spec.form.as_p }}
+    <p class="submit-row">
+    <input type="submit" value="{% trans "Search" %}">
+    <input type="reset" value="{% trans "Clear" %}">
+    </p>
+</form>
