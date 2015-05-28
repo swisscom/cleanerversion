@@ -557,7 +557,7 @@ class VersionedQuerySet(QuerySet):
         del_query.query.select_for_update = False
         del_query.query.select_related = False
         del_query.query.clear_ordering(force_empty=True)
-
+        print del_query.db
         collector = VersionedCollector(using=del_query.db)
         collector.collect([self])
         now = get_utc_now()

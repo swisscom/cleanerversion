@@ -155,9 +155,7 @@ class VersionedAdmin(admin.ModelAdmin):
         for object in queryset:
             object.delete()'''
 
-    '''def get_list_filter(self, request):
-        list_filter = super(VersionedAdmin,self).get_list_filter(request)
-        return list_filter + (DateTimeFilter,)'''
+
 
     def is_current(self, obj):
         return obj.is_current
