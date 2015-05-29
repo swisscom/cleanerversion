@@ -24,13 +24,13 @@ class DateTimeForm(forms.Form):
         field_name = kwargs.pop('field_name')
         super(DateTimeForm, self).__init__(*args, **kwargs)
         self.request = request
-        self.fields['%s_as_of' % field_name] = forms.DateTimeField(
+        self.fields['%s_as_of' % field_name] = forms.SplitDateTimeField(
             label='',
-            widget=AdminDateWidget(
+            widget=AdminSplitDateTime(
                 attrs={'placeholder': ('as of date and time')}
             ),
             localize=True,
-            required=False
+            required=True
         )
 
 
@@ -55,7 +55,8 @@ class DateTimeFilter(admin.FieldListFilter):
     template = 'datetimefilter.html'
 
     def __init__(self, field, request, params, model, model_admin, field_path):
-        self.lookup_kwarg_as_of = '%s_as_of' % field_path
+        self.lookup_kwarg_as_ofdate = '%s_as_of_0' % field_path
+        self.lookup_kwarg_as_oftime = '%s_as_of_1' % field_path
         super(DateTimeFilter, self).__init__(field, request, params, model, model_admin, field_path)
         self.form = self.get_form(request)
 
@@ -64,23 +65,20 @@ class DateTimeFilter(admin.FieldListFilter):
         return []
 
     def expected_parameters(self):
-        return [self.lookup_kwarg_as_of]
+        return [self.lookup_kwarg_as_ofdate,self.lookup_kwarg_as_oftime]
 
     def get_form(self, request):
         return DateTimeForm(request, data=self.used_parameters,
                              field_name=self.field_path)
 
     def queryset(self, request, queryset):
-        if self.form.is_valid():
+        if self.form.is_valid() and self.form.cleaned_data.values()[0] is not None:
             filter_params = self.form.cleaned_data.values()[0]
             print filter_params,  self.form.fields
             return queryset.as_of(filter_params)
-        #else:
+        else:
+            return queryset
 
-        return queryset
-
-admin.filters.FieldListFilter.register(
-    lambda f: isinstance(f, models.DateField), DateTimeFilter)
 
 
 class VersionedAdmin(admin.ModelAdmin):
