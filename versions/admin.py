@@ -74,7 +74,6 @@ class DateTimeFilter(admin.FieldListFilter):
     def queryset(self, request, queryset):
         if self.form.is_valid() and self.form.cleaned_data.values()[0] is not None:
             filter_params = self.form.cleaned_data.values()[0]
-            print filter_params,  self.form.fields
             return queryset.as_of(filter_params)
         else:
             return queryset
