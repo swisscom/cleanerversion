@@ -26,6 +26,7 @@ class DateTimeForm(forms.Form):
         self.request = request
         self.fields['%s_as_of' % field_name] = forms.SplitDateTimeField(
             label='',
+            input_time_formats=['%I:%M %p', '%H:%M:%S'],
             widget=AdminSplitDateTime(
                 attrs={'placeholder': ('as of date and time')}
             ),
