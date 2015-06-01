@@ -5,7 +5,7 @@ from django.db import models
 from django import forms
 from django.contrib.admin.templatetags.admin_static import static
 
-#admin.site.disable_action('delete_selected')
+
 
     #necessary right now because of the error about exclude not being a tuple since we are using @property to dynamicall
     #change it
@@ -147,10 +147,7 @@ class VersionedAdmin(admin.ModelAdmin):
 
         return obj
 
-    '''def delete_model(self, request, queryset):
-        """needed for bulk 'delete' of versionable objects"""
-        for object in queryset:
-            object.delete()'''
+
 
 
 
