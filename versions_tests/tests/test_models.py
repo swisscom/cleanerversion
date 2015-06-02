@@ -27,6 +27,7 @@ from django.db.models.deletion import ProtectedError
 from django.test import TestCase
 from django.utils.timezone import utc
 from django.utils import six
+from django import VERSION
 
 from versions.exceptions import DeletionOfNonCurrentVersionError
 from versions.models import get_utc_now, ForeignKeyRequiresValueError, Versionable
@@ -37,7 +38,13 @@ from versions_tests.models import (
 
 
 def get_relation_table(model_class, fieldname):
-    field_object, model, direct, m2m = model_class._meta.get_field_by_name(fieldname)
+
+    if VERSION[:2] >= (1, 8):
+        field_object = model_class._meta.get_field(fieldname)
+        direct = not field_object.auto_created or field_object.concrete
+    else:
+        field_object, _, direct, _ = model_class._meta.get_field_by_name(fieldname)
+
     if direct:
         field = field_object
     else:
