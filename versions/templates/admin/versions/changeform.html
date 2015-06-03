@@ -1,0 +1,14 @@
+{% extends "admin/change_form.html" %}
+{% load i18n admin_static admin_list admin_urls %}
+
+{% block extrastyle %}
+  {{ block.super }}
+  <link rel="stylesheet" type="text/css" href="{% static "admin/css/changelists.css" %}" />
+{% endblock %}
+
+{% block object-tools %}
+    {{ block.super }}
+    <li>
+        <a href="will_not_clone/" class="grp-state-focus" class="addlink">Save without cloning</a>
+    </li>
+{% endblock %}

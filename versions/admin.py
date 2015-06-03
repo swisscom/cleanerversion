@@ -1,19 +1,16 @@
-from django.contrib.admin.widgets import AdminSplitDateTime, AdminDateWidget
+from django.contrib.admin.widgets import AdminSplitDateTime
 from django.contrib.admin.checks import ModelAdminChecks
 from django.contrib import admin
-from django.db import models
 from django import forms
 from django.contrib.admin.templatetags.admin_static import static
-
-
+from django.http import HttpResponseRedirect
+from django.conf.urls import patterns, url
 
     #necessary right now because of the error about exclude not being a tuple since we are using @property to dynamicall
     #change it
 class VAdminChecks(ModelAdminChecks):
     def _check_exclude(self, cls, model):
         return []
-
-
 
 
 
@@ -92,7 +89,7 @@ class VersionedAdmin(admin.ModelAdmin):
     #new attribute for working with self.exclude method so that the subclass can specify more fields to exclude
     _exclude = None
     checks_class = VAdminChecks
-
+    change_form_template = 'admin/versions/changeform.html'
 
     def get_readonly_fields(self, request, obj=None):
         """this method is needed so that if a subclass of VersionedAdmin has readonly_fields the
@@ -126,7 +123,11 @@ class VersionedAdmin(admin.ModelAdmin):
         return list_filter + (('version_start_date',DateTimeFilter),)
 
 
-
+    def will_not_clone(self, request, *args, **kwargs):
+        paths = request.path.split('/')
+        paths = paths[1:3]
+        path = '/'+'/'.join(paths)
+        return HttpResponseRedirect(path)
 
     @property
     def exclude(self):
@@ -148,6 +149,15 @@ class VersionedAdmin(admin.ModelAdmin):
 
         return obj
 
+
+    def change_view(self, request, object_id, form_url='', extra_context=None):
+        extra_button = extra_context or {}
+
+        return super(VersionedAdmin, self).change_view(request, object_id, form_url, extra_button)
+
+    def get_urls(self):
+        not_clone_url = [url(r'^(.+)/will_not_clone/$',admin.site.admin_view(self.will_not_clone),name="willNotClone")]
+        return not_clone_url + super(VersionedAdmin,self).get_urls()
 
 
 
