@@ -126,10 +126,10 @@ class VersionedAdmin(admin.ModelAdmin):
     def will_not_clone(self, request, *args, **kwargs):
         """needed for save but not clone capability"""
         paths = request.path_info.split('/')
-        print paths
+
         object_id = paths[3]
         self.change_view(request,object_id)
-
+        #this gets the adminsite for the app, and the model name and joins together with /
         path = '/'+'/'.join(paths[1:3])
         return HttpResponseRedirect(path)
 
