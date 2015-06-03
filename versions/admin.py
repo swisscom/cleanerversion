@@ -124,7 +124,7 @@ class VersionedAdmin(admin.ModelAdmin):
 
 
     def will_not_clone(self, request, *args, **kwargs):
-        """needed for save but not clone capability"""
+        """needed for save but not clone capability, this is a view"""
         paths = request.path_info.split('/')
 
         object_id = paths[3]
