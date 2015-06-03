@@ -124,9 +124,13 @@ class VersionedAdmin(admin.ModelAdmin):
 
 
     def will_not_clone(self, request, *args, **kwargs):
-        paths = request.path.split('/')
-        paths = paths[1:3]
-        path = '/'+'/'.join(paths)
+        """needed for save but not clone capability"""
+        paths = request.path_info.split('/')
+        print paths
+        object_id = paths[3]
+        self.change_view(request,object_id)
+
+        path = '/'+'/'.join(paths[1:3])
         return HttpResponseRedirect(path)
 
     @property
@@ -144,16 +148,11 @@ class VersionedAdmin(admin.ModelAdmin):
     def get_object(self, request, object_id, from_field=None):
         obj = super(VersionedAdmin, self).get_object(request, object_id) #from_field breaks in 1.7.8
         #the things tested for in the if are for Updating an object; get_object is called three times: changeview, delete, and history
-        if request.method == "POST" and obj and obj.is_latest and not 'delete' in request.path:
+        if request.method == "POST" and obj and obj.is_latest and not 'will_not_clone' in request.path and not 'delete' in request.path:
             obj = obj.clone()
 
         return obj
 
-
-    def change_view(self, request, object_id, form_url='', extra_context=None):
-        extra_button = extra_context or {}
-
-        return super(VersionedAdmin, self).change_view(request, object_id, form_url, extra_button)
 
     def get_urls(self):
         not_clone_url = [url(r'^(.+)/will_not_clone/$',admin.site.admin_view(self.will_not_clone),name="willNotClone")]

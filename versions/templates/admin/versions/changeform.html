@@ -6,9 +6,7 @@
   <link rel="stylesheet" type="text/css" href="{% static "admin/css/changelists.css" %}" />
 {% endblock %}
 
-{% block object-tools %}
+{% block submit_buttons_bottom %}
     {{ block.super }}
-    <li>
-        <a href="will_not_clone/" class="grp-state-focus" class="addlink">Save without cloning</a>
-    </li>
+    <input formaction="will_not_clone/" type="submit" formmethod="POST" value="Save without cloning">
 {% endblock %}
