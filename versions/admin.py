@@ -86,8 +86,8 @@ class VersionedAdmin(admin.ModelAdmin):
     list_display_show_end_date = True
     list_display_show_start_date = True
     ordering = []
-    #new attribute for working with self.exclude method so that the subclass can specify more fields to exclude
-    _exclude = None
+
+
     checks_class = VAdminChecks
     change_form_template = 'admin/versions/changeform.html'
 
@@ -137,12 +137,11 @@ class VersionedAdmin(admin.ModelAdmin):
     def exclude(self):
         """need a getter for exclude since there is no get_exclude method to be overridden"""
         VERSIONED_EXCLUDE = ['id', 'identity', 'version_end_date', 'version_start_date', 'version_birth_date']
-        #creating _exclude so that self.exclude doesn't need to be called prompting recursion, and subclasses
-        #have a way to change what is excluded
-        if self._exclude is None:
+
+        if super(VersionedAdmin, self).exclude is None:
             return VERSIONED_EXCLUDE
         else:
-            return list(self._exclude) + VERSIONED_EXCLUDE
+            return list(super(VersionedAdmin, self).exclude) + VERSIONED_EXCLUDE
 
 
     def get_object(self, request, object_id, from_field=None):
