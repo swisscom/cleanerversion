@@ -326,7 +326,7 @@ class VersionedQuerySetTest(TestCase):
         self.assertEqual(True, b2.is_current)
         self.assertEqual(True, b3.is_current)
 
-        qs = B.objects.all()
+        qs = B.objects.filter(name__in = ['1','2','3']).all()
         qs.delete()
 
         b1 = B.objects.get(name = '1')
