@@ -151,7 +151,7 @@ class VersionedAdmin(admin.ModelAdmin):
 
     def get_object(self, request, object_id, from_field=None):
         """our implementation of get_object allows for cloning when updating an object, not cloning when the button
-        save but not clone is pushed and at no other time will clone be called"""
+        'save but not clone' is pushed and at no other time will clone be called"""
         obj = super(VersionedAdmin, self).get_object(request, object_id) #from_field breaks in 1.7.8
         #the things tested for in the if are for Updating an object; get_object is called three times: changeview, delete, and history
         if request.method == "POST" and obj and obj.is_latest and not 'will_not_clone' in request.path and not 'delete' in request.path:
