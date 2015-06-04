@@ -87,9 +87,10 @@ class VersionedAdmin(admin.ModelAdmin):
     list_display_show_start_date = True
     ordering = []
 
+    change_form_template = 'changeform.html'
 
     checks_class = VAdminChecks
-    change_form_template = 'admin/versions/changeform.html'
+
 
     def get_readonly_fields(self, request, obj=None):
         """this method is needed so that if a subclass of VersionedAdmin has readonly_fields the
@@ -145,6 +146,8 @@ class VersionedAdmin(admin.ModelAdmin):
 
 
     def get_object(self, request, object_id, from_field=None):
+        """our implementation of get_object allows for cloning when updating an object, not cloning when the button
+        save but not clone is pushed and at no other time will clone be called"""
         obj = super(VersionedAdmin, self).get_object(request, object_id) #from_field breaks in 1.7.8
         #the things tested for in the if are for Updating an object; get_object is called three times: changeview, delete, and history
         if request.method == "POST" and obj and obj.is_latest and not 'will_not_clone' in request.path and not 'delete' in request.path:
@@ -154,6 +157,7 @@ class VersionedAdmin(admin.ModelAdmin):
 
 
     def get_urls(self):
+        """needed to add the will_not_clone url to the admin site"""
         not_clone_url = [url(r'^(.+)/will_not_clone/$',admin.site.admin_view(self.will_not_clone),name="willNotClone")]
         return not_clone_url + super(VersionedAdmin,self).get_urls()
 
