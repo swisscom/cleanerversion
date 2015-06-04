@@ -71,6 +71,7 @@ class DateTimeFilter(admin.FieldListFilter):
         else:
             return queryset
 
+
 class VersionedAdmin(admin.ModelAdmin):
     """VersionedAdmin provides functionality to allow cloning of objects when saving, not cloning if a mistake was
     made, and making a current object historical by deleting"""
