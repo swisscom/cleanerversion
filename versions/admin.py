@@ -79,7 +79,6 @@ class DateTimeFilter(admin.FieldListFilter):
 
 
 class VersionedAdmin(admin.ModelAdmin):
-    #actions = ['delete_model']
     #these are so that the subclasses can overwrite these attributes
     # to have the identity, end date,or start date column not show
     list_display_show_identity = True
