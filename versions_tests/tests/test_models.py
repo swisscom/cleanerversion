@@ -66,6 +66,12 @@ def set_up_one_object_with_3_versions():
 
     return b, t1, t2, t3
 
+def create_three_current_objects():
+    b1 = B.objects.create(name = '1')
+    b2 = B.objects.create(name = '2')
+    b3 = B.objects.create(name = '3')
+    return b1, b2, b3
+
 
 def remove_white_spaces(self, s):
     return re.sub(r'\s+', '', s)
@@ -308,6 +314,27 @@ class VersionedQuerySetTest(TestCase):
 
         o = B.objects.as_of(t2).first()
         self.assertEqual('v2', o.name)
+
+
+    def test_queryset_using_delete(self):
+        """
+        Creates 3 objects with all current and then tests that the delete method
+        makes the current versions a historical version (adding a version_end_date)
+        """
+        b1, b2, b3 = create_three_current_objects()
+        self.assertEqual(True, b1.is_current)
+        self.assertEqual(True, b2.is_current)
+        self.assertEqual(True, b3.is_current)
+
+        qs = B.objects.all()
+        qs.delete()
+
+        b1 = B.objects.get(name = '1')
+        b2 = B.objects.get(name = '2')
+        b3 = B.objects.get(name = '3')
+        self.assertEqual(False, b1.is_current)
+        self.assertEqual(False, b2.is_current)
+        self.assertEqual(False, b3.is_current)
 
 
 class VersionNavigationTest(TestCase):

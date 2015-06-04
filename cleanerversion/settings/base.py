@@ -64,6 +64,7 @@ INSTALLED_APPS = (
     'django.contrib.messages',
     'django.contrib.staticfiles',
     'versions',
+    'versions_tests',
     'TestCase',
 )
 
