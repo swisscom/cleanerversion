@@ -92,8 +92,8 @@ class VersionedAdmin(admin.ModelAdmin):
 
 
     def get_readonly_fields(self, request, obj=None):
-        """this method is needed so that if a subclass of VersionedAdmin has readonly_fields the
-                the ones written above won't be undone"""
+        """this method is needed so that if a subclass of VersionedAdmin has readonly_fields ours won't
+        be undone"""
         if obj:
             return self.readonly_fields + ('id','identity','is_current')
         return self.readonly_fields
