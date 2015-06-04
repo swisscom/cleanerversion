@@ -98,13 +98,15 @@ class VersionedAdmin(admin.ModelAdmin):
             return self.readonly_fields + ('id','identity','is_current')
         return self.readonly_fields
 
+
     def get_ordering(self, request):
         return ['identity', '-version_start_date'] + self.ordering
+
 
     def get_list_display(self, request):
         """this method determines which fields go in the changelist"""
 
-        list_display = super(VersionedAdmin,self).get_list_display(request)
+        list_display = super(VersionedAdmin, self).get_list_display(request)
         #force cast to list as super get_list_display could return a tuple
         list_display = list(list_display)
         if self.list_display_show_identity:
@@ -117,6 +119,7 @@ class VersionedAdmin(admin.ModelAdmin):
             list_display += ['version_end_date']
 
         return list_display + ['is_current']
+
 
     def get_list_filter(self, request):
         list_filter = super(VersionedAdmin,self).get_list_filter(request)
@@ -133,6 +136,7 @@ class VersionedAdmin(admin.ModelAdmin):
         path = '/'+'/'.join(paths[1:3])
         return HttpResponseRedirect(path)
 
+
     @property
     def exclude(self):
         """need a getter for exclude since there is no get_exclude method to be overridden"""
@@ -144,6 +148,7 @@ class VersionedAdmin(admin.ModelAdmin):
         return VERSIONED_EXCLUDE
 
 
+
     def get_object(self, request, object_id, from_field=None):
         """our implementation of get_object allows for cloning when updating an object, not cloning when the button
         save but not clone is pushed and at no other time will clone be called"""
@@ -153,6 +158,7 @@ class VersionedAdmin(admin.ModelAdmin):
             obj = obj.clone()
 
         return obj
+
 
 
     def get_urls(self):
@@ -168,6 +174,7 @@ class VersionedAdmin(admin.ModelAdmin):
 
     is_current.boolean = True
     is_current.short_description = "Current"
+
 
     def identity_shortener(self,obj):
         return "..."+obj.identity[-12:]
