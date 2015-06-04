@@ -6,14 +6,12 @@ from django.contrib.admin.templatetags.admin_static import static
 from django.http import HttpResponseRedirect
 from django.conf.urls import url
 
-    #necessary right now because of the error about exclude not being a tuple since we are using @property to dynamicall
-    #change it
+
+#necessary right now because of the error about exclude not being a tuple since we are using @property to dynamically
+#change it
 class VAdminChecks(ModelAdminChecks):
     def _check_exclude(self, cls, model):
         return []
-
-
-
 
 
 class DateTimeForm(forms.Form):
@@ -25,12 +23,11 @@ class DateTimeForm(forms.Form):
             label='',
             input_time_formats=['%I:%M %p', '%H:%M:%S'],
             widget=AdminSplitDateTime(
-                attrs={'placeholder': ('as of date and time')}
+                attrs={'placeholder': 'as of date and time'}
             ),
             localize=True,
             required=True
         )
-
 
     @property
     def media(self):
@@ -58,16 +55,14 @@ class DateTimeFilter(admin.FieldListFilter):
         super(DateTimeFilter, self).__init__(field, request, params, model, model_admin, field_path)
         self.form = self.get_form(request)
 
-
     def choices(self, cl):
         return []
 
     def expected_parameters(self):
-        return [self.lookup_kwarg_as_ofdate,self.lookup_kwarg_as_oftime]
+        return [self.lookup_kwarg_as_ofdate, self.lookup_kwarg_as_oftime]
 
     def get_form(self, request):
-        return DateTimeForm(request, data=self.used_parameters,
-                             field_name=self.field_path)
+        return DateTimeForm(request, data=self.used_parameters, field_name=self.field_path)
 
     def queryset(self, request, queryset):
         if self.form.is_valid() and self.form.cleaned_data.values()[0] is not None:
@@ -76,9 +71,9 @@ class DateTimeFilter(admin.FieldListFilter):
         else:
             return queryset
 
-
-
 class VersionedAdmin(admin.ModelAdmin):
+    """VersionedAdmin provides functionality to allow cloning of objects when saving, not cloning if a mistake was
+    made, and making a current object historical by deleting"""
     #these are so that the subclasses can overwrite these attributes
     # to have the identity, end date,or start date column not show
     list_display_show_identity = True
@@ -90,18 +85,15 @@ class VersionedAdmin(admin.ModelAdmin):
 
     checks_class = VAdminChecks
 
-
     def get_readonly_fields(self, request, obj=None):
         """this method is needed so that if a subclass of VersionedAdmin has readonly_fields ours won't
         be undone"""
         if obj:
-            return self.readonly_fields + ('id','identity','is_current')
+            return self.readonly_fields + ('id', 'identity', 'is_current')
         return self.readonly_fields
-
 
     def get_ordering(self, request):
         return ['identity', '-version_start_date'] + self.ordering
-
 
     def get_list_display(self, request):
         """this method determines which fields go in the changelist"""
@@ -120,23 +112,20 @@ class VersionedAdmin(admin.ModelAdmin):
 
         return list_display + ['is_current']
 
-
     def get_list_filter(self, request):
         """this adds the filtering ability to changelist"""
-        list_filter = super(VersionedAdmin,self).get_list_filter(request)
-        return list_filter + (('version_start_date',DateTimeFilter),)
-
+        list_filter = super(VersionedAdmin, self).get_list_filter(request)
+        return list_filter + (('version_start_date', DateTimeFilter),)
 
     def will_not_clone(self, request, *args, **kwargs):
         """needed for save but not clone capability, this is a view"""
         paths = request.path_info.split('/')
 
         object_id = paths[3]
-        self.change_view(request,object_id)
+        self.change_view(request, object_id)
         #this gets the adminsite for the app, and the model name and joins together with /
         path = '/'+'/'.join(paths[1:3])
         return HttpResponseRedirect(path)
-
 
     @property
     def exclude(self):
@@ -148,8 +137,6 @@ class VersionedAdmin(admin.ModelAdmin):
 
         return VERSIONED_EXCLUDE
 
-
-
     def get_object(self, request, object_id, from_field=None):
         """our implementation of get_object allows for cloning when updating an object, not cloning when the button
         'save but not clone' is pushed and at no other time will clone be called"""
@@ -160,15 +147,10 @@ class VersionedAdmin(admin.ModelAdmin):
 
         return obj
 
-
-
     def get_urls(self):
         """needed to add the will_not_clone url to the admin site"""
-        not_clone_url = [url(r'^(.+)/will_not_clone/$',admin.site.admin_view(self.will_not_clone))]
-        return not_clone_url + super(VersionedAdmin,self).get_urls()
-
-
-
+        not_clone_url = [url(r'^(.+)/will_not_clone/$',admin.site.admin_view(self. will_not_clone))]
+        return not_clone_url + super(VersionedAdmin, self).get_urls()
 
     def is_current(self, obj):
         return obj.is_current
@@ -177,13 +159,8 @@ class VersionedAdmin(admin.ModelAdmin):
     is_current.short_description = "Current"
 
 
-    def identity_shortener(self,obj):
+    def identity_shortener(self, obj):
         return "..."+obj.identity[-12:]
 
     identity_shortener.boolean = False
     identity_shortener.short_description = "Short Identity"
-
-
-
-
-
