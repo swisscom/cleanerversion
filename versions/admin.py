@@ -138,10 +138,10 @@ class VersionedAdmin(admin.ModelAdmin):
         """need a getter for exclude since there is no get_exclude method to be overridden"""
         VERSIONED_EXCLUDE = ['id', 'identity', 'version_end_date', 'version_start_date', 'version_birth_date']
 
-        if super(VersionedAdmin, self).exclude is None:
-            return VERSIONED_EXCLUDE
-        else:
-            return list(super(VersionedAdmin, self).exclude) + VERSIONED_EXCLUDE
+        if super(VersionedAdmin, self).exclude is not None:
+            VERSIONED_EXCLUDE = list(super(VersionedAdmin, self).exclude) + VERSIONED_EXCLUDE
+
+        return VERSIONED_EXCLUDE
 
 
     def get_object(self, request, object_id, from_field=None):
