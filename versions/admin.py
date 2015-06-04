@@ -163,7 +163,7 @@ class VersionedAdmin(admin.ModelAdmin):
 
     def get_urls(self):
         """needed to add the will_not_clone url to the admin site"""
-        not_clone_url = [url(r'^(.+)/will_not_clone/$',admin.site.admin_view(self.will_not_clone),name="willNotClone")]
+        not_clone_url = [url(r'^(.+)/will_not_clone/$',admin.site.admin_view(self.will_not_clone))]
         return not_clone_url + super(VersionedAdmin,self).get_urls()
 
 
