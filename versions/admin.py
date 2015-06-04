@@ -122,6 +122,7 @@ class VersionedAdmin(admin.ModelAdmin):
 
 
     def get_list_filter(self, request):
+        """this adds the filtering ability to changelist"""
         list_filter = super(VersionedAdmin,self).get_list_filter(request)
         return list_filter + (('version_start_date',DateTimeFilter),)
 
