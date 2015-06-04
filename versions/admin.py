@@ -4,7 +4,7 @@ from django.contrib import admin
 from django import forms
 from django.contrib.admin.templatetags.admin_static import static
 from django.http import HttpResponseRedirect
-from django.conf.urls import patterns, url
+from django.conf.urls import url
 
     #necessary right now because of the error about exclude not being a tuple since we are using @property to dynamicall
     #change it
