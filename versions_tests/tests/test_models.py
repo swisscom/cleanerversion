@@ -27,6 +27,7 @@ from django.db.models.deletion import ProtectedError
 from django.test import TestCase
 from django.utils.timezone import utc
 from django.utils import six
+from django import VERSION
 
 from versions.exceptions import DeletionOfNonCurrentVersionError
 from versions.models import get_utc_now, ForeignKeyRequiresValueError, Versionable
@@ -37,7 +38,13 @@ from versions_tests.models import (
 
 
 def get_relation_table(model_class, fieldname):
-    field_object, model, direct, m2m = model_class._meta.get_field_by_name(fieldname)
+
+    if VERSION[:2] >= (1, 8):
+        field_object = model_class._meta.get_field(fieldname)
+        direct = not field_object.auto_created or field_object.concrete
+    else:
+        field_object, _, direct, _ = model_class._meta.get_field_by_name(fieldname)
+
     if direct:
         field = field_object
     else:
@@ -250,7 +257,7 @@ class DeletionHandlerTest(TestCase):
         self.assertEqual(1, City.objects.current.filter(pk=self.city.pk).count())
 
     def test_deleting_when_m2m_history(self):
-        through = Award._meta.get_field_by_name('players')[0].rel.through
+        through = Award._meta.get_field('players').rel.through
         a1 = Award.objects.create(name="bravo")
         p1 = Player.objects.create(name="Jessie")
         a1.players = [p1]
@@ -2300,7 +2307,7 @@ class VersionRestoreTest(TestCase):
         self.assertEqual(1, Team.objects.filter(name='team2.v1').count())
         self.assertEqual(3, Player.objects.filter(identity=p1.identity).count())
         self.assertEqual(1, Player.objects.filter(name='p2.v1').count())
-        m2m_manager = Award._meta.get_field_by_name('players')[0].rel.through.objects
+        m2m_manager = Award._meta.get_field('players').rel.through.objects
         self.assertEqual(1, m2m_manager.all().count())
 
 class DetachTest(TestCase):

@@ -853,7 +853,11 @@ def create_versioned_many_related_manager(superclass, rel):
                 version_start_date_field = self.through._meta.get_field('version_start_date')
                 version_end_date_field = self.through._meta.get_field('version_end_date')
             except FieldDoesNotExist as e:
-                print(str(e) + "; available fields are " + ", ".join(self.through._meta.get_all_field_names()))
+                if VERSION[:2] >= (1, 8):
+                    fields = [f.name for f in self.through._meta.get_fields()]
+                else:
+                    fields =  self.through._meta.get_all_field_names()
+                print(str(e) + "; available fields are " + ", ".join(fields))
                 raise e
                 # FIXME: this probably does not work when auto-referencing
 
