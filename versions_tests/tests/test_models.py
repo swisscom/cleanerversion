@@ -27,7 +27,9 @@ from django.db.models.deletion import ProtectedError
 from django.test import TestCase
 from django.utils.timezone import utc
 from django.utils import six
+from django import VERSION
 
+from versions.exceptions import DeletionOfNonCurrentVersionError
 from versions.models import get_utc_now, ForeignKeyRequiresValueError, Versionable
 from versions_tests.models import (
     Award, B, C1, C2, C3, City, Classroom, Directory, Fan, Mascot, NonFan, Observer, Person, Player, Professor, Pupil,
@@ -36,7 +38,13 @@ from versions_tests.models import (
 
 
 def get_relation_table(model_class, fieldname):
-    field_object, model, direct, m2m = model_class._meta.get_field_by_name(fieldname)
+
+    if VERSION[:2] >= (1, 8):
+        field_object = model_class._meta.get_field(fieldname)
+        direct = not field_object.auto_created or field_object.concrete
+    else:
+        field_object, _, direct, _ = model_class._meta.get_field_by_name(fieldname)
+
     if direct:
         field = field_object
     else:
@@ -145,10 +153,43 @@ class DeletionTest(TestCase):
         current = B.objects.current.first()
         previous = B.objects.previous_version(current)
 
-        self.assertRaises(Exception, previous.delete)
+        self.assertRaises(DeletionOfNonCurrentVersionError, previous.delete)
+
+    def test_delete_using_current_queryset(self):
+        B.objects.current.all().delete()
+        bs = list(B.objects.all())
+        self.assertEqual(3, len(bs))
+        for b in bs:
+            self.assertIsNotNone(b.version_end_date)
+
+    def test_delete_using_non_current_queryset(self):
+
+        B.objects.create(name='Buzz')
+
+        qs = B.objects.all().filter(version_end_date__isnull=True)
+        self.assertEqual(2, len(qs))
+        pks = [o.pk for o in qs]
+
+        qs.delete()
+        bs = list(B.objects.all().filter(pk__in=pks))
+        self.assertEqual(2, len(bs))
+        for b in bs:
+            self.assertIsNotNone(b.version_end_date)
+
+    def test_deleteing_non_current_version_with_queryset(self):
+        qs = B.objects.all().filter(version_end_date__isnull=False)
+        self.assertEqual(2, qs.count())
+        pks = [o.pk for o in qs]
+
+        B.objects.all().filter(pk__in=pks).delete()
+
+        # None of the objects should have been deleted, because they are not current.
+        self.assertEqual(2, B.objects.all().filter(pk__in=pks).count())
 
 
 class DeletionHandlerTest(TestCase):
+    """Tests that the ForeignKey on_delete parameters have the expected effects"""
+
     def setUp(self):
         self.city = City.objects.create(name='c.v1')
         self.team = Team.objects.create(name='t.v1', city=self.city)
@@ -222,7 +263,7 @@ class DeletionHandlerTest(TestCase):
         self.assertEqual(1, City.objects.current.filter(pk=self.city.pk).count())
 
     def test_deleting_when_m2m_history(self):
-        through = Award._meta.get_field_by_name('players')[0].rel.through
+        through = Award._meta.get_field('players').rel.through
         a1 = Award.objects.create(name="bravo")
         p1 = Player.objects.create(name="Jessie")
         a1.players = [p1]
@@ -583,6 +624,10 @@ class OneToManyTest(TestCase):
         # We didn't change anything to the players so there must be 2 players in
         # the team at time t1...
         team_at_t1 = Team.objects.as_of(t1).first()
+        # TODO: Remove the following (useless) line, once Django1.8 is working
+        t1_player_queryset = team_at_t1.player_set.all()
+        # TODO: [django18 compat] The SQL query in t1_player_queryset.query shows that the Team pk value (team_at_t1.id)
+        # is used to look up the players (instead of the identity property value (team_at_t1.identity))
         self.assertEqual(2, team_at_t1.player_set.count())
 
         # ... and at time t2
@@ -2289,7 +2334,7 @@ class VersionRestoreTest(TestCase):
         self.assertEqual(1, Team.objects.filter(name='team2.v1').count())
         self.assertEqual(3, Player.objects.filter(identity=p1.identity).count())
         self.assertEqual(1, Player.objects.filter(name='p2.v1').count())
-        m2m_manager = Award._meta.get_field_by_name('players')[0].rel.through.objects
+        m2m_manager = Award._meta.get_field('players').rel.through.objects
         self.assertEqual(1, m2m_manager.all().count())
 
 class DetachTest(TestCase):
