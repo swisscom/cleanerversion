@@ -107,6 +107,9 @@ class IsCurrentFilter(admin.SimpleListFilter):
 class VersionedAdmin(admin.ModelAdmin):
     """VersionedAdmin provides functionality to allow cloning of objects when saving, not cloning if a mistake was
     made, and making a current object historical by deleting"""
+    class Media:
+        js = ('js/admin_addon.js',)
+
     #these are so that the subclasses can overwrite these attributes
     # to have the identity, end date,or start date column not show
     list_display_show_identity = True
@@ -115,7 +118,7 @@ class VersionedAdmin(admin.ModelAdmin):
     ordering = []
 
 
-    change_form_template = 'changeform.html'
+
 
     checks_class = VAdminChecks
 
