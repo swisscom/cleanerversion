@@ -574,7 +574,8 @@ class VersionedQuerySet(QuerySet):
         del_query.query.select_related = False
         del_query.query.clear_ordering(force_empty=True)
 
-        collector = versions_settings.VERSIONED_DELETE_COLLECTOR_CLASS(using=del_query.db)
+        collector_class = versions_settings.get_versioned_delete_collector_class()
+        collector = collector_class(using=del_query.db)
         collector.collect(del_query)
         collector.delete(get_utc_now())
 
@@ -1146,7 +1147,8 @@ class Versionable(models.Model):
             "{} object can't be deleted because its {} attribute is set to None.".format(
                 self._meta.object_name, self._meta.pk.attname)
 
-        collector = versions_settings.VERSIONED_DELETE_COLLECTOR_CLASS(using=using)
+        collector_class = versions_settings.get_versioned_delete_collector_class()
+        collector = collector_class(using=using)
         collector.collect([self])
         collector.delete(get_utc_now())
 

@@ -16,7 +16,21 @@ def import_from_string(val, setting_name):
         raise ImportError("Could not import '{}' for CleanerVersion setting '{}'. {}: {}.".format(
             (val, setting_name, e.__class__.__name__, e)))
 
-VERSIONED_DELETE_COLLECTOR_CLASS = import_from_string(
-    getattr(settings, 'VERSIONED_DELETE_COLLECTOR', 'versions.deletion.VersionedCollector'),
-    'VERSIONED_DELETE_COLLECTOR'
-)
+_cache = {}
+def get_versioned_delete_collector_class():
+    """
+    Gets the class to use for deletion collection.
+
+    This is done as a method instead of just defining a module-level variable because
+    Django doesn't like attributes of the django.conf.settings object to be accessed
+    in top-level module scope.
+
+    :return: class
+    """
+    key = 'VERSIONED_DELETE_COLLECTOR'
+    try:
+        cls = _cache[key]
+    except KeyError:
+        cls = import_from_string(getattr(settings, key, 'versions.deletion.VersionedCollector'), key)
+        _cache[key] = cls
+    return cls
