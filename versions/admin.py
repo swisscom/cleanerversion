@@ -46,9 +46,12 @@ class DateTimeForm(forms.Form):
             )
 
 
+
+
+
 class DateTimeFilter(admin.FieldListFilter):
     template = 'datetimefilter.html'
-
+    title = 'DateTime filter'
     def __init__(self, field, request, params, model, model_admin, field_path):
         self.lookup_kwarg_as_ofdate = '%s_as_of_0' % field_path
         self.lookup_kwarg_as_oftime = '%s_as_of_1' % field_path
@@ -71,6 +74,35 @@ class DateTimeFilter(admin.FieldListFilter):
         else:
             return queryset
 
+class IsCurrentFilter(admin.SimpleListFilter):
+    title = 'Is Current filter'
+    parameter_name = 'is_current'
+
+    def __init__(self, request, params, model, model_admin):
+        self.lookup_kwarg = 'is_current'
+        self.lookup_val = request.GET.get(self.lookup_kwarg, None)
+        super(IsCurrentFilter, self).__init__(request, params, model, model_admin)
+
+
+    def lookups(self, request, model_admin):
+        return [(None, 'All'), ('1', 'Current')]
+
+    def choices(self, cl):
+        for lookup, title in self.lookup_choices:
+            yield {
+                'selected': self.value() == lookup,
+                'query_string': cl.get_query_string({
+                    self.parameter_name: lookup,
+                }, []),
+                'display': title,
+            }
+
+
+    def queryset(self, request, queryset):
+        if self.lookup_val:
+            return queryset.as_of()
+        else:
+            return queryset
 
 class VersionedAdmin(admin.ModelAdmin):
     """VersionedAdmin provides functionality to allow cloning of objects when saving, not cloning if a mistake was
@@ -81,6 +113,7 @@ class VersionedAdmin(admin.ModelAdmin):
     list_display_show_end_date = True
     list_display_show_start_date = True
     ordering = []
+
 
     change_form_template = 'changeform.html'
 
@@ -116,7 +149,7 @@ class VersionedAdmin(admin.ModelAdmin):
     def get_list_filter(self, request):
         """this adds the filtering ability to changelist"""
         list_filter = super(VersionedAdmin, self).get_list_filter(request)
-        return list_filter + (('version_start_date', DateTimeFilter),)
+        return list_filter + (('version_start_date', DateTimeFilter),IsCurrentFilter)
 
     def will_not_clone(self, request, *args, **kwargs):
         """needed for save but not clone capability, this is a view"""
