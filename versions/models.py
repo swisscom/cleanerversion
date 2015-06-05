@@ -19,6 +19,8 @@ from collections import namedtuple
 import re
 from django import VERSION
 
+if VERSION[:2] >= (1, 8):
+    from django.db.models.sql.datastructures import Join
 if VERSION[:2] >= (1, 7):
     from django.apps.registry import apps
 from django.core.exceptions import SuspiciousOperation, ObjectDoesNotExist
@@ -284,7 +286,7 @@ class VersionManager(models.Manager):
 class VersionedWhereNode(WhereNode):
     def as_sql(self, qn, connection):
         """
-        :param qn: In Django 1.7 this is a compiler; in 1.6, it's an instance-method
+        :param qn: In Django 1.7 & 1.8 this is a compiler; in 1.6, it's an instance-method
         :param connection: A DB connection
         :return: A tuple consisting of (sql_string, result_params)
         """
@@ -292,20 +294,32 @@ class VersionedWhereNode(WhereNode):
         for child in self.children:
             if isinstance(child, VersionedExtraWhere) and not child.params:
                 try:
-                    # Django 1.7 handles compilers as objects
+                    # Django 1.7 & 1.8 handles compilers as objects
                     _query = qn.query
                 except AttributeError:
                     # Django 1.6 handles compilers as instancemethods
                     _query = qn.__self__.query
                 query_time = _query.querytime.time
                 apply_query_time = _query.querytime.active
-                # Use the join_map to know, what *table* gets joined to which
+                # In Django 1.6 & 1.7, use the join_map to know, what *table* gets joined to which
                 # *left-hand sided* table
-                for lhs, table, join_cols in _query.join_map:
-                    if (lhs == child.alias and table == child.related_alias) \
+                # In Django 1.8, use the Join objects in alias_map
+                if hasattr(_query, 'join_map'):
+                    for lhs, table, join_cols in _query.join_map:
+                        if (lhs == child.alias and table == child.related_alias) \
+                                or (lhs == child.related_alias and table == child.alias):
+                            child.set_joined_alias(table)
+                            break
+                else:
+                    for table in _query.alias_map:
+                        join = _query.alias_map[table]
+                        if not isinstance(join, Join):
+                            continue
+                        lhs = join.parent_alias
+                        if (lhs == child.alias and table == child.related_alias) \
                             or (lhs == child.related_alias and table == child.alias):
-                        child.set_joined_alias(table)
-                        break
+                            child.set_joined_alias(table)
+                            break
                 if apply_query_time:
                     # Add query parameters that have not been added till now
                     child.set_as_of(query_time)
@@ -781,7 +795,7 @@ class VersionedForeignRelatedObjectsDescriptor(ForeignRelatedObjectsDescriptor):
 
                 # This is a hack, in order to get the versioned related objects
                 for key in self.core_filters.keys():
-                    if '__exact' in key:
+                    if '__exact' in key or '__' not in key:
                         self.core_filters[key] = instance.identity
 
             def get_queryset(self):
@@ -839,7 +853,11 @@ def create_versioned_many_related_manager(superclass, rel):
                 version_start_date_field = self.through._meta.get_field('version_start_date')
                 version_end_date_field = self.through._meta.get_field('version_end_date')
             except FieldDoesNotExist as e:
-                print(str(e) + "; available fields are " + ", ".join(self.through._meta.get_all_field_names()))
+                if VERSION[:2] >= (1, 8):
+                    fields = [f.name for f in self.through._meta.get_fields()]
+                else:
+                    fields =  self.through._meta.get_all_field_names()
+                print(str(e) + "; available fields are " + ", ".join(fields))
                 raise e
                 # FIXME: this probably does not work when auto-referencing
 

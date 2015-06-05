@@ -1,3 +1,4 @@
+from django import VERSION
 from django.db.models.deletion import (
     attrgetter, signals, six, sql, transaction,
     CASCADE,
@@ -41,7 +42,7 @@ class VersionedCollector(Collector):
         # end of a transaction.
         self.sort()
 
-        with transaction.commit_on_success_unless_managed(using=self.using):
+        with transaction.atomic(using=self.using, savepoint=False):
             # send pre_delete signals, but not for versionables
             for model, obj in self.instances_with_model():
                 if not model._meta.auto_created:
@@ -134,7 +135,11 @@ class VersionedCollector(Collector):
         Gets a QuerySet of current objects related to ``objs`` via the relation ``related``.
 
         """
-        return related.model._base_manager.current.using(self.using).filter(
+        if VERSION >= (1, 8):
+            related_model = related.related_model
+        else:
+            related_model = related.model
+        return related_model._base_manager.current.using(self.using).filter(
             **{"%s__in" % related.field.name: objs}
         )
 

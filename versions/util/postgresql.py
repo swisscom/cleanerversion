@@ -116,7 +116,7 @@ def create_current_version_unique_indexes(app_name, database=None):
                 col_prefixes = []
                 columns = []
                 for field in group:
-                    column = model._meta.get_field_by_name(field)[0].column
+                    column = model._meta.get_field(field).column
                     col_prefixes.append(column[0:3])
                     columns.append(column)
                 index_name = '%s_%s_%s_v_uniq' % (app_name, table_name, '_'.join(col_prefixes))
