@@ -43,8 +43,8 @@ from django.utils import six
 from django.db import models, router
 
 from versions import settings as versions_settings
-from versions.deletion import VersionedCollector
 from versions.exceptions import DeletionOfNonCurrentVersionError
+from versions.deletion import VersionedCollector
 
 
 def get_utc_now():
@@ -287,7 +287,7 @@ class VersionManager(models.Manager):
 class VersionedWhereNode(WhereNode):
     def as_sql(self, qn, connection):
         """
-        :param qn: In Django 1.7 & 1.8 this is a compiler; in 1.6, it's an instance-method
+        :param qn: In Django 1.7 this is a compiler; in 1.6, it's an instance-method
         :param connection: A DB connection
         :return: A tuple consisting of (sql_string, result_params)
         """
@@ -295,32 +295,20 @@ class VersionedWhereNode(WhereNode):
         for child in self.children:
             if isinstance(child, VersionedExtraWhere) and not child.params:
                 try:
-                    # Django 1.7 & 1.8 handles compilers as objects
+                    # Django 1.7 handles compilers as objects
                     _query = qn.query
                 except AttributeError:
                     # Django 1.6 handles compilers as instancemethods
                     _query = qn.__self__.query
                 query_time = _query.querytime.time
                 apply_query_time = _query.querytime.active
-                # In Django 1.6 & 1.7, use the join_map to know, what *table* gets joined to which
+                # Use the join_map to know, what *table* gets joined to which
                 # *left-hand sided* table
-                # In Django 1.8, use the Join objects in alias_map
-                if hasattr(_query, 'join_map'):
-                    for lhs, table, join_cols in _query.join_map:
-                        if (lhs == child.alias and table == child.related_alias) \
-                                or (lhs == child.related_alias and table == child.alias):
-                            child.set_joined_alias(table)
-                            break
-                else:
-                    for table in _query.alias_map:
-                        join = _query.alias_map[table]
-                        if not isinstance(join, Join):
-                            continue
-                        lhs = join.parent_alias
-                        if (lhs == child.alias and table == child.related_alias) \
+                for lhs, table, join_cols in _query.join_map:
+                    if (lhs == child.alias and table == child.related_alias) \
                             or (lhs == child.related_alias and table == child.alias):
-                            child.set_joined_alias(table)
-                            break
+                        child.set_joined_alias(table)
+                        break
                 if apply_query_time:
                     # Add query parameters that have not been added till now
                     child.set_as_of(query_time)
@@ -796,7 +784,7 @@ class VersionedForeignRelatedObjectsDescriptor(ForeignRelatedObjectsDescriptor):
 
                 # This is a hack, in order to get the versioned related objects
                 for key in self.core_filters.keys():
-                    if '__exact' in key or '__' not in key:
+                    if '__exact' in key:
                         self.core_filters[key] = instance.identity
 
             def get_queryset(self):
@@ -854,11 +842,7 @@ def create_versioned_many_related_manager(superclass, rel):
                 version_start_date_field = self.through._meta.get_field('version_start_date')
                 version_end_date_field = self.through._meta.get_field('version_end_date')
             except FieldDoesNotExist as e:
-                if VERSION[:2] >= (1, 8):
-                    fields = [f.name for f in self.through._meta.get_fields()]
-                else:
-                    fields =  self.through._meta.get_all_field_names()
-                print(str(e) + "; available fields are " + ", ".join(fields))
+                print(str(e) + "; available fields are " + ", ".join(self.through._meta.get_all_field_names()))
                 raise e
                 # FIXME: this probably does not work when auto-referencing
 
@@ -1143,13 +1127,12 @@ class Versionable(models.Model):
 
     def delete(self, using=None):
         using = using or router.db_for_write(self.__class__, instance=self)
-        assert self._get_pk_val() is not None, \
-            "{} object can't be deleted because its {} attribute is set to None.".format(
-                self._meta.object_name, self._meta.pk.attname)
+        assert self._get_pk_val() is not None, "%s object can't be deleted because its %s attribute is set to None." % (self._meta.object_name, self._meta.pk.attname)
 
-        collector = versions_settings.VERSIONED_DELETE_COLLECTOR_CLASS(using=using)
+        now = get_utc_now()
+        collector = VersionedCollector(using=using)
         collector.collect([self])
-        collector.delete(get_utc_now())
+        collector.delete(now)
 
     def _delete_at(self, timestamp, using=None):
         """
@@ -1166,7 +1149,7 @@ class Versionable(models.Model):
             self.version_end_date = timestamp
             self.save(force_update=True, using=using)
         else:
-            raise DeletionOfNonCurrentVersionError('Cannot delete anything else but the current version')
+            raise Exception('Cannot delete anything else but the current version')
 
     @property
     def is_current(self):
