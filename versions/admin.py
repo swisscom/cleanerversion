@@ -108,6 +108,7 @@ class VersionedAdmin(admin.ModelAdmin):
     """VersionedAdmin provides functionality to allow cloning of objects when saving, not cloning if a mistake was
     made, and making a current object historical by deleting"""
     class Media:
+        #http://snipplr.com/view/62778/override-the-changeview-in-the-admin/ gives options for adding buttons selectively
         js = ('js/admin_addon.js',)
 
     #these are so that the subclasses can overwrite these attributes
