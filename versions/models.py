@@ -51,6 +51,12 @@ def get_utc_now():
     return datetime.datetime.utcnow().replace(tzinfo=utc)
 
 
+def validate_uuid(uuid_obj):
+    """
+    Check that the UUID object is in fact a valid version 4 uuid.
+    """
+    return isinstance(uuid_obj, uuid.UUID) and uuid_obj.version == 4
+
 QueryTime = namedtuple('QueryTime', 'time active')
 
 
@@ -63,11 +69,6 @@ class VersionManager(models.Manager):
     This is the Manager-class for any class that inherits from Versionable
     """
     use_for_related_fields = True
-
-    # Based on http://en.wikipedia.org/wiki/Universally_unique_identifier#Version_4_.28random.29
-    # Matches a valid hyphen-separated version 4 UUID string.
-    uuid_valid_form_regex = re.compile(
-        '^[A-Fa-f0-9]{8}-[A-Fa-f0-9]{4}-4[A-Fa-f0-9]{3}-[89aAbB][A-Fa-f0-9]{3}-[A-Fa-f0-9]{12}$')
 
     def get_queryset(self):
         """
@@ -248,24 +249,14 @@ class VersionManager(models.Manager):
 
         Create a Versionable having a version_start_date and version_birth_date set to some pre-defined timestamp
         :param timestamp: point in time at which the instance has to be created
-        :param id: version 4 UUID unicode string.  Usually this is not specified, it will be automatically created.
-        :param forced_identity: version 4 UUID unicode string.  For internal use only.
+        :param id: version 4 UUID unicode object.  Usually this is not specified, it will be automatically created.
+        :param forced_identity: version 4 UUID unicode object.  For internal use only.
         :param kwargs: arguments needed for initializing the instance
         :return: an instance of the class
         """
-        if id:
-            if not self.validate_uuid(id):
-                raise ValueError("id, if provided, must be a valid UUID version 4 string")
-            # Ensure that it's a unicode string:
-            id = six.text_type(id)
-
-        else:
-            id = Versionable.uuid()
-
+        id = Versionable.uuid(id)
         if forced_identity:
-            if not self.validate_uuid(forced_identity):
-                raise ValueError("forced_identity, if provided, must be a valid UUID version 4 string")
-            ident = six.text_type(forced_identity)
+            ident = Versionable.uuid(forced_identity)
         else:
             ident = id
 
@@ -276,12 +267,6 @@ class VersionManager(models.Manager):
         kwargs['version_start_date'] = timestamp
         kwargs['version_birth_date'] = timestamp
         return super(VersionManager, self).create(**kwargs)
-
-    def validate_uuid(self, uuid_string):
-        """
-        Check that the UUID string is in fact a valid uuid.
-        """
-        return self.uuid_valid_form_regex.match(uuid_string) is not None
 
 
 class VersionedWhereNode(WhereNode):
@@ -1209,13 +1194,22 @@ class Versionable(models.Model):
         self._querytime = QueryTime(time=time, active=True)
 
     @staticmethod
-    def uuid():
+    def uuid(uuid_value=None):
         """
-        Gets a new uuid string that is valid to use for id and identity fields.
+        Returns a uuid value that is valid to use for id and identity fields.
 
-        :return: unicode uuid string
+        :return: unicode uuid object if using UUIDFields, uuid unicode string otherwise.
         """
-        return six.u(str(uuid.uuid4()))
+        if uuid_value:
+            if not validate_uuid(uuid_value):
+                raise ValueError("uuid_value must be a valid UUID version 4 object")
+        else:
+            uuid_value = uuid.uuid4()
+
+        if versions_settings.use_uuidfield:
+            return uuid_value
+        else:
+            return six.u(str(uuid_value))
 
     def _clone_at(self, timestamp):
         """

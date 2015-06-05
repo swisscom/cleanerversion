@@ -1,5 +1,6 @@
 from django.conf import settings
 import importlib
+from django import VERSION
 
 
 def import_from_string(val, setting_name):
@@ -52,4 +53,6 @@ def get_setting(setting_name):
         return getattr(settings, setting_name)
     except AttributeError:
         return _defaults[setting_name]
+
+use_uuidfield = VERSION[:3] >= (1,8,3)
 

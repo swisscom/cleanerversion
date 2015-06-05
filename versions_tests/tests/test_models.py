@@ -2165,15 +2165,15 @@ class SpecifiedUUIDTest(TestCase):
 
     @staticmethod
     def uuid4():
-        return six.text_type(str(uuid.uuid4()))
+        return uuid.uuid4()
 
     def test_create_with_uuid(self):
         p_id = self.uuid4()
         p = Person.objects.create(id=p_id, name="Alice")
-        self.assertEqual(p_id, p.id)
-        self.assertEqual(p_id, p.identity)
+        self.assertEqual(str(p_id), str(p.id))
+        self.assertEqual(str(p_id), str(p.identity))
 
-        p_id = six.text_type(str(uuid.uuid5(uuid.NAMESPACE_OID, 'bar')))
+        p_id = uuid.uuid5(uuid.NAMESPACE_OID, 'bar')
         with self.assertRaises(ValueError):
             Person.objects.create(id=p_id, name="Alexis")
 
