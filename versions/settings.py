@@ -1,5 +1,5 @@
 from django.conf import settings
-from django.utils import importlib
+import importlib
 
 
 def import_from_string(val, setting_name):
