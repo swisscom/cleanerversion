@@ -1998,9 +1998,12 @@ class PrefetchingTests(TestCase):
             self.assertEqual(self.city1, team.city)
 
     def test_prefetch_related_via_many_to_many(self):
+        # award1 - award10
         awards = [Award.objects.create(name='award' + str(i)) for i in range(1, 11)]
+        # city0 - city2
         cities = [City.objects.create(name='city-' + str(i)) for i in range(3)]
         teams = []
+        # team-0-0 with city0 - team-2-1 with city1
         for i in range(3):
             for j in range(2):
                 teams.append(Team.objects.create(
@@ -2016,6 +2019,12 @@ class PrefetchingTests(TestCase):
 
         t2 = get_utc_now()
 
+        # players is player-0-0 with team-0-0 through player-5-5 with team-2-1
+        # players with awards:
+        # player-[012345]-1, [012345]-3, [012345]-5,
+        # the -1s have awards: 1,2
+        # the -3s have awards: 3,4
+        # the -5s have awards: 5,6
         with self.assertNumQueries(6):
             players_t2 = list(
                 Player.objects.as_of(t2).prefetch_related('team', 'awards').filter(
@@ -2164,8 +2173,12 @@ class FilterOnForeignKeyRelationTest(TestCase):
 class SpecifiedUUIDTest(TestCase):
 
     @staticmethod
-    def uuid4():
-        return uuid.uuid4()
+    def uuid4(uuid_value=None):
+        if not uuid_value:
+            return uuid.uuid4()
+        if isinstance(uuid_value, uuid.UUID):
+            return uuid_value
+        return uuid.UUID(uuid_value)
 
     def test_create_with_uuid(self):
         p_id = self.uuid4()
@@ -2189,12 +2202,14 @@ class SpecifiedUUIDTest(TestCase):
         if connection.vendor == 'postgresql' and get_version() >= '1.7':
             with self.assertRaises(IntegrityError):
                 with transaction.atomic():
-                    Person.objects.create(forced_identity=p.identity, name="Alexis")
+                    ident = self.uuid4(p.identity)
+                    Person.objects.create(forced_identity=ident, name="Alexis")
 
         p.delete()
         sleep(0.1)  # The start date of p2 does not necessarily have to equal the end date of p.
 
-        p2 = Person.objects.create(forced_identity=p.identity, name="Alexis")
+        ident = self.uuid4(p.identity)
+        p2 = Person.objects.create(forced_identity=ident, name="Alexis")
         p2.version_birth_date = p.version_birth_date
         p2.save()
         self.assertEqual(p.identity, p2.identity)

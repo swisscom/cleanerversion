@@ -16,8 +16,6 @@ import copy
 import datetime
 import uuid
 from collections import namedtuple
-import re
-
 from django import VERSION
 
 if VERSION[:2] >= (1, 8):
@@ -43,7 +41,8 @@ from django.utils import six
 
 from django.db import models, router
 
-from versions import settings as versions_settings
+from versions.settings import get_versioned_delete_collector_class
+from versions.settings import settings as versions_settings
 from versions.exceptions import DeletionOfNonCurrentVersionError
 
 
@@ -560,7 +559,7 @@ class VersionedQuerySet(QuerySet):
         del_query.query.select_related = False
         del_query.query.clear_ordering(force_empty=True)
 
-        collector_class = versions_settings.get_versioned_delete_collector_class()
+        collector_class = get_versioned_delete_collector_class()
         collector = collector_class(using=del_query.db)
         collector.collect(del_query)
         collector.delete(get_utc_now())
@@ -1096,11 +1095,17 @@ class Versionable(models.Model):
     VERSIONABLE_FIELDS = [VERSION_IDENTIFIER_FIELD, OBJECT_IDENTIFIER_FIELD, 'version_start_date',
                           'version_end_date', 'version_birth_date']
 
-    id = models.CharField(max_length=36, primary_key=True)
-    """id stands for ID and is the primary key; sometimes also referenced as the surrogate key"""
+    if versions_settings.VERSIONS_USE_UUIDFIELD:
+        id = models.UUIDField(primary_key=True)
+        """id stands for ID and is the primary key; sometimes also referenced as the surrogate key"""
+    else:
+        id = models.CharField(max_length=36, primary_key=True)
 
-    identity = models.CharField(max_length=36)
-    """identity is used as the identifier of an object, ignoring its versions; sometimes also referenced as the natural key"""
+    if versions_settings.VERSIONS_USE_UUIDFIELD:
+        identity = models.UUIDField()
+        """identity is used as the identifier of an object, ignoring its versions; sometimes also referenced as the natural key"""
+    else:
+        identity = models.CharField(max_length=36)
 
     version_start_date = models.DateTimeField()
     """version_start_date points the moment in time, when a version was created (ie. an versionable was cloned).
@@ -1136,7 +1141,7 @@ class Versionable(models.Model):
             "{} object can't be deleted because its {} attribute is set to None.".format(
                 self._meta.object_name, self._meta.pk.attname)
 
-        collector_class = versions_settings.get_versioned_delete_collector_class()
+        collector_class = get_versioned_delete_collector_class()
         collector = collector_class(using=using)
         collector.collect([self])
         collector.delete(get_utc_now())
@@ -1206,7 +1211,7 @@ class Versionable(models.Model):
         else:
             uuid_value = uuid.uuid4()
 
-        if versions_settings.use_uuidfield:
+        if versions_settings.VERSIONS_USE_UUIDFIELD:
             return uuid_value
         else:
             return six.u(str(uuid_value))
