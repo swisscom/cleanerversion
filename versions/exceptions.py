@@ -1,0 +1,2 @@
+class DeletionOfNonCurrentVersionError(ValueError):
+    pass
