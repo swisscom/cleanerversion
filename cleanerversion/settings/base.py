@@ -86,7 +86,7 @@ USE_L10N = True
 USE_TZ = True
 
 
-ROOT_URLCONF = 'TestCase.urls'
+ROOT_URLCONF = 'cleanerversion.urls'
 
 
 STATIC_URL = '/static/'

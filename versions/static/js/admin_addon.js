@@ -1,8 +1,9 @@
 function update_document() {
 	// for the Source template:
     (function($) {
-        $('input[name="_addanother"]').before('<input formaction="will_not_clone/" type="submit" formmethod="POST" value="Save without cloning">');
-    })(django.jQuery)
+        if($('ul').hasClass('object-tools')) {
+            $('input[name="_addanother"]').before('<input formaction="will_not_clone/" type="submit" formmethod="POST" value="Save without cloning">');
+        }})(django.jQuery)
 
 
 }
