@@ -682,7 +682,7 @@ class VersionedManyToManyField(ManyToManyField):
         """
         super(VersionedManyToManyField, self).contribute_to_related_class(cls, related)
         accessor_name = related.get_accessor_name()
-        if hasattr(cls, accessor_name):
+        if accessor_name and hasattr(cls, accessor_name):
             descriptor = VersionedManyRelatedObjectsDescriptor(related, accessor_name)
             setattr(cls, accessor_name, descriptor)
             if hasattr(cls._meta, 'many_to_many_related') and isinstance(cls._meta.many_to_many_related, list):
