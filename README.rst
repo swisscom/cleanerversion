@@ -41,7 +41,7 @@ CleanerVersion's feature-set includes the following bullet points:
 
 * Migrations, if using in conjunction with Django 1.7 and upwards
 
-* Integration with Django Admin
+* Integration with Django Admin (Credits to @boydjohnson and @peterfarrell)
 
 
 Prerequisites
