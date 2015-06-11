@@ -50,7 +50,7 @@ Prerequisites
 This code was tested with the following technical components
 
 * Python 2.7 & 3.4
-* Django 1.6 & 1.7
+* Django 1.6, 1.7 & 1.8
 * PostgreSQL 9.3.4 & SQLite3
 
 
