@@ -1,3 +1,5 @@
 include LICENSE*
 include NOTICE*
 global-exclude *.py[c|o]
+recursive-include versions/templates *
+recursive-include versions/static *
