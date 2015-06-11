@@ -695,6 +695,5 @@ Known Issues
 * Creating `Unique Indexes`_ is a bit tricky for versioned database tables.  A solution is provided for Postgresql (see the
   `Postgresql specific`_ section).  Pull requests are welcome if you solve this problem for another database system.
 
-* No integration with Django admin: The Django admin does not call `.clone()`. Such an integration appears to be non-trivial. For more information, see `issue #59 <https://github.com/swisscom/cleanerversion/issues/59>`_.
 
 For a more up-to-date state please check our `project page <https://github.com/swisscom/cleanerversion>`_.
