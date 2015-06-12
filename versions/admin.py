@@ -40,7 +40,7 @@ class DateTimeFilterForm(forms.Form):
 
 
 class DateTimeFilter(admin.FieldListFilter):
-    template = 'datetimefilter.html'
+    template = 'versions/datetimefilter.html'
     title = 'DateTime filter'
 
     def __init__(self, field, request, params, model, model_admin, field_path):
