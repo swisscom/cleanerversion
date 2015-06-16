@@ -1,10 +1,17 @@
 from django.contrib.admin.widgets import AdminSplitDateTime
 from django.contrib.admin.checks import ModelAdminChecks
 from django.contrib import admin
+from django.contrib.admin.utils import unquote
 from django import forms
 from django.contrib.admin.templatetags.admin_static import static
 from django.http import HttpResponseRedirect
 from django.conf.urls import url
+from django.core.exceptions import PermissionDenied
+from django.shortcuts import get_object_or_404
+from django.contrib.admin.options import get_content_type_for_model
+from django.utils.encoding import force_text
+from django.utils.text import capfirst
+from django.template.response import TemplateResponse
 
 
 class DateTimeFilterForm(forms.Form):
@@ -194,6 +201,38 @@ class VersionedAdmin(admin.ModelAdmin):
             obj = obj.clone()
 
         return obj
+
+    def history_view(self, request, object_id, extra_context=None):
+        "The 'history' admin view for this model."
+        from django.contrib.admin.models import LogEntry
+        # First check if the user can see this history.
+        model = self.model
+        obj = get_object_or_404(self.get_queryset(request), pk=unquote(object_id))
+        if not self.has_change_permission(request, obj):
+            raise PermissionDenied
+
+        # Then get the history for this object.
+        opts = model._meta
+        app_label = opts.app_label
+        action_list = LogEntry.objects.filter(
+            object_id=unquote(obj.identity),  #this is the change for our override;
+            content_type=get_content_type_for_model(model)
+        ).select_related().order_by('action_time')
+
+        context = dict(self.admin_site.each_context(),
+            title=('Change history: %s') % force_text(obj),
+            action_list=action_list,
+            module_name=capfirst(force_text(opts.verbose_name_plural)),
+            object=obj,
+            opts=opts,
+            preserved_filters=self.get_preserved_filters(request),
+        )
+        context.update(extra_context or {})
+        return TemplateResponse(request, self.object_history_template or [
+            "admin/%s/%s/object_history.html" % (app_label, opts.model_name),
+            "admin/%s/object_history.html" % app_label,
+            "admin/object_history.html"
+        ], context, current_app=self.admin_site.name)
 
     def get_urls(self):
         """
