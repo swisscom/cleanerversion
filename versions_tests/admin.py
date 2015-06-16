@@ -6,5 +6,6 @@ from versions_tests.models import City, Student, Observer, Professor, Subject, T
 
 
 admin.site.register(
-    [City, Student, Subject, Teacher, Team, Player, Award, Observer, ChainStore, Professor, Classroom, Wine,
-     WineDrinker, WineDrinkerHat], VersionedAdmin)
+    [City, Student, Subject, Teacher, Team, Player, Award, Observer, ChainStore, Professor, Classroom,
+     WineDrinker], VersionedAdmin)
+admin.site.register([Wine, WineDrinkerHat],admin.ModelAdmin)
