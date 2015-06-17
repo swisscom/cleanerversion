@@ -1,4 +1,4 @@
 include LICENSE*
 include NOTICE*
 global-exclude *.py[c|o]
-recursive-include versions *.htm[l] *.js
+global-include *.htm[l] *.js
