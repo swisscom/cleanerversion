@@ -1,4 +1,4 @@
 include LICENSE*
 include NOTICE*
 global-exclude *.py[c|o]
-global-include *.htm[l] *.js
+include *.htm[l] *.js
