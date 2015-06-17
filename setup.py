@@ -35,6 +35,7 @@ setup(name='CleanerVersion',
       packages=find_packages(exclude=['cleanerversion', 'cleanerversion.*']),
       url='https://github.com/boydjohnson/cleanerversion',
       install_requires=['django'],
+      package_data={'versions': ['static/js/*.js','templates/versions/*.html']},
       classifiers=[
           'Development Status :: 4 - Beta',
           'Framework :: Django',
