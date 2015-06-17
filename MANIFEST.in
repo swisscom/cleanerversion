@@ -1,5 +1,5 @@
 include LICENSE*
 include NOTICE*
 global-exclude *.py[c|o]
-recursive-include templates *.htm[l]
-recursive-include static *.js
+recursive-include versions/templates *.htm[l]
+recursive-include versions/static *.js
