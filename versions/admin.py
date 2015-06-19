@@ -165,6 +165,9 @@ class VersionedAdmin(admin.ModelAdmin):
         list_filter = super(VersionedAdmin, self).get_list_filter(request)
         return list_filter + (('version_start_date', DateTimeFilter), IsCurrentFilter)
 
+    def restore(self,request, *args, **kwargs):
+        return True
+
     def will_not_clone(self, request, *args, **kwargs):
         """
         Add save but not clone capability in the changeview
