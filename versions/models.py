@@ -149,7 +149,7 @@ class VersionManager(models.Manager):
 
         return self.adjust_version_as_of(previous, relations_as_of)
 
-    def current_version(self, object, relations_as_of=None):
+    def current_version(self, object, relations_as_of=None, check_db=False):
         """
         Return the current version of the given object.
 
@@ -157,9 +157,9 @@ class VersionManager(models.Manager):
         If there is not such a version then it means the object has been 'deleted'
         and so there is no current version available. In this case the function returns None.
 
-        Note that if object's version_end_date is None, this does not check the database to
-        see if there is a newer version (perhaps created by some other code), it simply
-        returns the passed object.
+        Note that if check_db is False and object's version_end_date is None, this does not
+        check the database to see if there is a newer version (perhaps created by some other code),
+        it simply returns the passed object.
 
         ``relations_as_of`` is used to fix the point in time for the version; this affects which related
         objects are returned when querying for object relations. See ``VersionManager.version_as_of``
@@ -167,9 +167,10 @@ class VersionManager(models.Manager):
 
         :param Versionable object: object whose current version will be returned.
         :param mixed relations_as_of: determines point in time used to access relations. 'start'|'end'|datetime|None
+        :param bool check_db: Whether or not to look in the database for a more recent version
         :return: Versionable
         """
-        if object.version_end_date is None:
+        if object.version_end_date is None and not check_db:
             current = object
         else:
             current = self.current.filter(identity=object.identity).first()
@@ -1350,12 +1351,6 @@ class Versionable(models.Model):
             raise ValueError('This is the current version, no need to restore it.')
 
         cls = self.__class__
-
-        # If this is not the latest version, get it; it will need to be terminated before restoring.
-        latest = None
-        if not self.is_latest:
-            latest = cls.objects.current_version(self)
-
         now = get_utc_now()
         restored = copy.copy(self)
         restored.version_end_date = None
@@ -1377,8 +1372,11 @@ class Versionable(models.Model):
         self.id = self.uuid()
 
         with transaction.atomic():
-            if latest:
+            # If this is not the latest version, terminate the latest version
+            latest = cls.objects.current_version(self, check_db=True)
+            if latest and latest != self:
                 latest.delete()
+
             self.save()
             restored.save()
 
