@@ -6,9 +6,9 @@ CleanerVersion for Django
     :target: https://travis-ci.org/swisscom/cleanerversion
 .. image:: https://coveralls.io/repos/swisscom/cleanerversion/badge.png?branch=master
    :target: https://coveralls.io/r/swisscom/cleanerversion
-.. image:: https://pypip.in/v/cleanerversion/badge.png
+.. image:: https://img.shields.io/pypi/v/CleanerVersion.svg
    :target: https://pypi.python.org/pypi/CleanerVersion
-.. image:: https://pypip.in/d/cleanerversion/badge.png
+.. image:: https://img.shields.io/pypi/dw/CleanerVersion.svg
    :target: https://pypi.python.org/pypi/CleanerVersion
 
 Abstract
