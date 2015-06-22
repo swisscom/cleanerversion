@@ -6,15 +6,18 @@
         z-index: 1100;
         margin-left: -251px;
     }
+
     .datetimeshortcuts {
         /* Hide "|" symbol */
         font-size: 0;
     }
-    .datetimeshortcuts a:before{
+
+    .datetimeshortcuts a:before {
         /* Restore deleted spaces */
         content: " ";
     }
-    .datetimeshortcuts a{
+
+    .datetimeshortcuts a {
         /* Make text for "Today" a bit smaller so it appears on one line. */
         font-size: 7pt;
     }
@@ -23,7 +26,7 @@
     {{ spec.form.media }}
     {{ spec.form.as_p }}
     <p class="submit-row">
-    <input type="submit" value="{% trans "Search" %}">
-    <input type="reset" value="{% trans "Clear" %}">
+        <input type="submit" value="{% trans "Search" %}">
+        <input type="reset" value="{% trans "Clear" %}">
     </p>
 </form>

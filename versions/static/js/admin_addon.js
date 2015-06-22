@@ -1,17 +1,18 @@
 function update_document() {
-	// for the Source template:
-    (function($) {
-        if($('ul').hasClass('object-tools')) {
+    // for the Source template:
+    (function ($) {
+        if ($('ul').hasClass('object-tools')) {
             $('input[name="_addanother"]').before('<input formaction="will_not_clone/" type="submit" formmethod="POST" value="Save without cloning">');
-        }})(django.jQuery)
+        }
+    })(django.jQuery)
 
 
 }
 
-function make_restore_button(){
-    (function($){
-        if($('ul').hasClass('object-tools')){
-            if($('div.field-id p').text()!=$('div.field-identity p').text()) {
+function make_restore_button() {
+    (function ($) {
+        if ($('ul').hasClass('object-tools')) {
+            if ($('div.field-id p').text() != $('div.field-identity p').text()) {
                 $('input[name="_addanother"]').before('<input formaction="restore/" type="submit" formmethod="POST" value="Restore"');
             }
         }

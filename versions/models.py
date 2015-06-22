@@ -17,6 +17,7 @@ import datetime
 import uuid
 from collections import namedtuple
 import re
+
 from django import VERSION
 
 if VERSION[:2] >= (1, 8):
@@ -260,7 +261,6 @@ class VersionManager(models.Manager):
         else:
             id = Versionable.uuid()
 
-
         if forced_identity:
             if not self.validate_uuid(forced_identity):
                 raise ValueError("forced_identity, if provided, must be a valid UUID version 4 string")
@@ -317,7 +317,7 @@ class VersionedWhereNode(WhereNode):
                             continue
                         lhs = join.parent_alias
                         if (lhs == child.alias and table == child.related_alias) \
-                            or (lhs == child.related_alias and table == child.alias):
+                                or (lhs == child.related_alias and table == child.alias):
                             child.set_joined_alias(table)
                             break
                 if apply_query_time:
@@ -581,6 +581,7 @@ class VersionedQuerySet(QuerySet):
 
         # Clear the result cache, in case this QuerySet gets reused.
         self._result_cache = None
+
     delete.alters_data = True
     delete.queryset_only = True
 
@@ -765,8 +766,8 @@ class VersionedReverseSingleRelatedObjectDescriptor(ReverseSingleRelatedObjectDe
 
         if not isinstance(current_elt, Versionable):
             raise TypeError("VersionedForeignKey target is of type "
-                + str(type(current_elt))
-                + ", which is not a subclass of Versionable")
+                            + str(type(current_elt))
+                            + ", which is not a subclass of Versionable")
 
         if hasattr(instance, '_querytime'):
             # If current_elt matches the instance's querytime, there's no need to make a database query.
@@ -803,7 +804,8 @@ class VersionedForeignRelatedObjectsDescriptor(ForeignRelatedObjectsDescriptor):
                 queryset = super(VersionedRelatedManager, self).get_queryset()
                 # Do not set the query time if it is already correctly set.  queryset.as_of() returns a clone
                 # of the queryset, and this will destroy the prefetched objects cache if it exists.
-                if isinstance(queryset, VersionedQuerySet) and self.instance._querytime.active and queryset.querytime != self.instance._querytime:
+                if isinstance(queryset,
+                              VersionedQuerySet) and self.instance._querytime.active and queryset.querytime != self.instance._querytime:
                     queryset = queryset.as_of(self.instance._querytime.time)
                 return queryset
 
@@ -857,7 +859,7 @@ def create_versioned_many_related_manager(superclass, rel):
                 if VERSION[:2] >= (1, 8):
                     fields = [f.name for f in self.through._meta.get_fields()]
                 else:
-                    fields =  self.through._meta.get_all_field_names()
+                    fields = self.through._meta.get_all_field_names()
                 print(str(e) + "; available fields are " + ", ".join(fields))
                 raise e
                 # FIXME: this probably does not work when auto-referencing
@@ -929,6 +931,7 @@ def create_versioned_many_related_manager(superclass, rel):
                 def using_replacement(self, *args, **kwargs):
                     qs = __using_backup(self, *args, **kwargs)
                     return qs.as_of(None)
+
                 klass.using = using_replacement
                 super(VersionedManyRelatedManager, self).add(*objs)
                 klass.using = __using_backup
@@ -1318,9 +1321,11 @@ class Versionable(models.Model):
         # Perform the bulk changes rel.clone() did not perform because of the in_bulk parameter
         # This saves a huge bunch of SQL queries:
         # - update current version entries
-        source.through.objects.filter(id__in=[l.id for l in later_current]).update(**{'version_start_date': forced_version_date})
+        source.through.objects.filter(id__in=[l.id for l in later_current]).update(
+            **{'version_start_date': forced_version_date})
         # - update entries that have been pointing the current object, but have never been 'current'
-        source.through.objects.filter(id__in=[l.id for l in later_non_current]).update(**{source.source_field_name: self})
+        source.through.objects.filter(id__in=[l.id for l in later_non_current]).update(
+            **{source.source_field_name: self})
         # - create entries that were 'current', but which have been relieved in this method run
         source.through.objects.bulk_create([r for r in m2m_rels if hasattr(r, '_not_created') and r._not_created])
 
