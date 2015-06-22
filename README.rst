@@ -2,9 +2,9 @@
 CleanerVersion for Django
 *************************
 
-.. image:: https://travis-ci.org/swisscom/cleanerversion.png?branch=master
+.. image:: https://img.shields.io/travis/swisscom/cleanerversion/master.svg
     :target: https://travis-ci.org/swisscom/cleanerversion
-.. image:: https://coveralls.io/repos/swisscom/cleanerversion/badge.png?branch=master
+.. image:: https://img.shields.io/coveralls/swisscom/cleanerversion/master.svg
    :target: https://coveralls.io/r/swisscom/cleanerversion
 .. image:: https://img.shields.io/pypi/v/CleanerVersion.svg
    :target: https://pypi.python.org/pypi/CleanerVersion
