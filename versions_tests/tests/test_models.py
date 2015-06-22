@@ -2337,6 +2337,26 @@ class VersionRestoreTest(TestCase):
         m2m_manager = Award._meta.get_field('players').rel.through.objects
         self.assertEqual(1, m2m_manager.all().count())
 
+    def test_restore_two_in_memory_objects(self):
+        # Tests issue #90
+        # Restoring two in-memory objects with the same identity, which, according
+        # to their in-memory state, are both the current version, should not
+        # result in having more than one current object with the same identity
+        # present in the database.
+        a = City(name="A")
+        a.save()
+        b = a.clone()
+        b.name = "B"
+        b.save()
+        a = City.objects.get(name="A")
+        a.restore()
+        b = City.objects.get(name="B")
+        b2 = b.restore()
+        current_objects = City.objects.filter(version_end_date=None, identity=b.identity)
+        self.assertEqual(1, len(current_objects))
+        self.assertEqual(b2.pk, current_objects[0].pk)
+
+
 class DetachTest(TestCase):
 
     def test_simple_detach(self):

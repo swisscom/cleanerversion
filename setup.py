@@ -21,7 +21,7 @@ If you get errors, check the following things:
 """
 
 setup(name='CleanerVersion',
-      version='1.5.0',
+      version='1.5.2',
       description='A versioning solution for relational data models using the Django ORM',
       long_description='CleanerVersion is a solution that allows you to read and write multiple versions of an entry '
                        'to and from your relational database. It allows to keep track of modifications on an object '
@@ -33,7 +33,7 @@ setup(name='CleanerVersion',
       author_email='engineering.sophia@swisscom.com',
       license='Apache License 2.0',
       packages=find_packages(exclude=['cleanerversion', 'cleanerversion.*']),
-      url='https://github.com/boydjohnson/cleanerversion',
+      url='https://github.com/swisscom/cleanerversion',
       install_requires=['django'],
       package_data={'versions': ['static/js/*.js','templates/versions/*.html']},
       classifiers=[

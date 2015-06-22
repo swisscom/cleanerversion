@@ -132,7 +132,7 @@ class VersionedAdmin(admin.ModelAdmin):
         This is required a subclass of VersionedAdmin has readonly_fields ours won't be undone
         """
         if obj:
-            return self.readonly_fields + ('id', 'identity', 'is_current', )
+            return self.readonly_fields + ('id', 'identity', 'is_current',)
         return self.readonly_fields
 
     def get_ordering(self, request):
@@ -232,18 +232,18 @@ class VersionedAdmin(admin.ModelAdmin):
         opts = model._meta
         app_label = opts.app_label
         action_list = LogEntry.objects.filter(
-            object_id=unquote(obj.identity),  #this is the change for our override;
+            object_id=unquote(obj.identity),  # this is the change for our override;
             content_type=get_content_type_for_model(model)
         ).select_related().order_by('action_time')
 
-        context = dict(self.admin_site.each_context(),
-            title=('Change history: %s') % force_text(obj),
-            action_list=action_list,
-            module_name=capfirst(force_text(opts.verbose_name_plural)),
-            object=obj,
-            opts=opts,
-            preserved_filters=self.get_preserved_filters(request),
-        )
+        context = dict(self.admin_site.each_context(request),
+                       title=('Change history: %s') % force_text(obj),
+                       action_list=action_list,
+                       module_name=capfirst(force_text(opts.verbose_name_plural)),
+                       object=obj,
+                       opts=opts,
+                       preserved_filters=self.get_preserved_filters(request),
+                       )
         context.update(extra_context or {})
         return TemplateResponse(request, self.object_history_template or [
             "admin/%s/%s/object_history.html" % (app_label, opts.model_name),

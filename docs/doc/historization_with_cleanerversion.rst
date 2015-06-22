@@ -3,7 +3,7 @@ Historization with CleanerVersion
 *********************************
 
 Disclaimer: This documentation as well as the CleanerVersion application code have been written to work against Django
-1.6.x and 1.7.x. The documentation may not be accurate anymore when using more recent versions of Django.
+1.6.x, 1.7.x and 1.8.x. The documentation may not be accurate anymore when using more recent versions of Django.
 
 .. _cleanerversion-quick-starter:
 
@@ -55,9 +55,9 @@ would be a working example, if place in the same source file. Here's how::
         address = CharField(max_length=200)
         phone = CharField(max_length=200)
 
-Assuming you know how to deal with `Django Models <https://docs.djangoproject.com/en/stable/topics/db/models/>`_ (you will need to sync your DB before your
-code gets usable; Or you're only testing, then that step is done by Django), the next step is using your model to create
-some entries::
+Assuming you know how to deal with `Django Models <https://docs.djangoproject.com/en/stable/topics/db/models/>`_ (you
+will need to sync your DB before your code gets usable; Or you're only testing, then that step is done by Django), the
+next step is using your model to create some entries::
 
     p = Person.objects.create(name='Donald Fauntleroy Duck', address='Duckburg', phone='123456')
     t1 = datetime.utcnow().replace(tzinfo=utc)
@@ -182,13 +182,11 @@ Pretty easy, isn't it? ;)
 Slowly Changing Dimensions - Type 2
 ===================================
 
-Find the basics of `slowly changing dimensions - type 2`_ and other types at Wikipedia. These concepts were taken
-over and extended to cover different types of relationships.
+Find the basics of `slowly changing dimensions - type 2
+<http://en.wikipedia.org/wiki/Slowly_changing_dimension#Type_2>`_ and other types at Wikipedia.
+These concepts were taken over and extended to cover different types of relationships.
 
 The technical details and assumptions are documented in the following sections.
-
-.. _`slowly changing dimensions - type 2`: http://en.wikipedia.org/wiki/Slowly_changing_dimension#Type_2
-__ `slowly changing dimensions - type 2`_
 
 Historization of a single entity
 ================================
@@ -374,6 +372,7 @@ Assume a Person can be part of multiple SportsClubs::
 
 Adding objects to a versioned M2M relationship
 ----------------------------------------------
+
 Adding objects to a many-to-many relationship works just like in standard Django::
 
     person1 = Person.objects.create(name="Hanover Fiste", phone="555-1234")
@@ -398,6 +397,7 @@ Changing many-to-many relationships is only allowed when using the current versi
 
 Reading objects from a versioned M2M relationship
 -------------------------------------------------
+
 This works just like in standard Django, with the exception that you specify either that you are using
 the current state, or the state at a specific point in time::
 
@@ -416,6 +416,7 @@ the current state, or the state at a specific point in time::
 
 Versioning objects being part of a versioned M2M relationship
 -------------------------------------------------------------
+
 Versioning an object in a ManyToMany relationship requires 3 steps to be done, including the initial setup:
 
 1) Setting up the situation requires to add at least two objects to a M2M relationship::
@@ -431,6 +432,7 @@ Versioning an object in a ManyToMany relationship requires 3 steps to be done, i
 
   .. image:: ../images/clone_m2m_item_2.png
         :align: center
+
 3) CleanerVersion takes care of cloning and re-linking also the relationships::
 
     # done automatically by cleanerversion when item1.clone() was called
@@ -459,6 +461,7 @@ Navigating between different versions of an object
 
 Accessing the version at a given point in time
 ----------------------------------------------
+
 If you have an object item1, and know that it existed at some other time t1, you can get the other version like this::
 
     # Will throw exception if no object exists:
@@ -481,6 +484,7 @@ not the newest version from the database.
 
 Accessing the previous and next versions of an object
 -----------------------------------------------------
+
 You can navigate between the versions of an object that you have.
 
 ``previous_version(obj)`` will provide the previous version of obj.  If there is no previous version, the returned
@@ -611,6 +615,7 @@ the `Postgresql specific`_ section for more detail.
 
 Specifying the id of an object at creation time
 ===============================================
+
 It is possible to specify an id when creating a new object, instead of letting CleanerVersion do this for you.  The
 id must be a unicode string representing a
 `version 4 UUID <http://en.wikipedia.org/wiki/Universally_unique_identifier#Version_4_.28random.29>`_.
@@ -625,6 +630,7 @@ will need to be ready to handle that.
 
 Postgresql specific
 ===================
+
 Django creates `extra indexes <https://docs.djangoproject.com/en/1.7/ref/databases/#indexes-for-varchar-and-text-columns>`_
 for CharFields that are used for like queries (e.g. WHERE foo like 'fish%'). Since Django 1.6 and 1.7 do not support
 native database UUID fields, the UUID fields that are used for the id and identity columns of Versionable models have these extra
@@ -687,11 +693,12 @@ Note that M2M-relationships have not been extended yet to work in a heterogeneou
 VersionedAdmin admin for Django Admin
 =====================================
 
-VersionedAdmin has three boolean fields that allow subclasses to easily control if the shortened identity, the version end date,
-and the version start date show in the change view. These fields are list_display_show_identity, list_display_show_end_date,
-and list_display_show_start_date and by default they are set to True.
+VersionedAdmin has three boolean fields that allow subclasses to easily control if the shortened identity, the version
+end date, and the version start date show in the change view. These fields are ``list_display_show_identity``,
+``list_display_show_end_date``, and ``list_display_show_start_date`` and by default they are set to ``True``.
 
-Out of the box, VersionedAdmin allows for filtering the change view by the as_of queryset filter, and whether the object is current.
+Out of the box, VersionedAdmin allows for filtering the change view by the ``as_of`` queryset filter, and whether the
+object is current.
 
 Known Issues
 ============

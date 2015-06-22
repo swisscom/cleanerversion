@@ -6,9 +6,9 @@ from versions.models import Versionable, VersionedManyToManyField, VersionedFore
 
 
 def versionable_description(obj):
-    return "<" +str(obj.__class__.__name__) + " object: " + \
-        obj.name + " {valid: [" + obj.version_start_date.isoformat() + " | " + (
-            obj.version_end_date.isoformat() if obj.version_end_date else "None") + "], created: " +obj.version_birth_date.isoformat() + "}>"
+    return "<" + str(obj.__class__.__name__) + " object: " + \
+           obj.name + " {valid: [" + obj.version_start_date.isoformat() + " | " + (
+               obj.version_end_date.isoformat() if obj.version_end_date else "None") + "], created: " + obj.version_birth_date.isoformat() + "}>"
 
 
 ############################################
@@ -39,12 +39,14 @@ class City(Versionable):
 
     __str__ = versionable_description
 
+
 @python_2_unicode_compatible
 class Team(Versionable):
     name = CharField(max_length=200)
     city = VersionedForeignKey(City, null=True)
 
     __str__ = versionable_description
+
 
 @python_2_unicode_compatible
 class Player(Versionable):
@@ -53,9 +55,11 @@ class Player(Versionable):
 
     __str__ = versionable_description
 
+
 class Award(Versionable):
     name = CharField(max_length=200)
     players = VersionedManyToManyField(Player, related_name='awards')
+
 
 @python_2_unicode_compatible
 class Mascot(Versionable):
@@ -64,8 +68,10 @@ class Mascot(Versionable):
 
     __str__ = versionable_description
 
+
 def default_team():
     return Team.objects.current.get(name__startswith='default_team.')
+
 
 @python_2_unicode_compatible
 class Fan(Versionable):
@@ -74,6 +80,7 @@ class Fan(Versionable):
 
     __str__ = versionable_description
 
+
 @python_2_unicode_compatible
 class RabidFan(Versionable):
     name = CharField(max_length=200)
@@ -81,12 +88,14 @@ class RabidFan(Versionable):
 
     __str__ = versionable_description
 
+
 @python_2_unicode_compatible
 class WizardFan(Versionable):
     name = CharField(max_length=200)
     team = VersionedForeignKey(Team, null=True, on_delete=PROTECT)
 
     __str__ = versionable_description
+
 
 @python_2_unicode_compatible
 class NonFan(Versionable):
@@ -113,12 +122,14 @@ class Professor(Versionable):
 
     __str__ = versionable_description
 
+
 @python_2_unicode_compatible
 class Classroom(Versionable):
     name = CharField(max_length=200)
     building = CharField(max_length=200)
 
     __str__ = versionable_description
+
 
 @python_2_unicode_compatible
 class Student(Versionable):
@@ -140,6 +151,7 @@ class Pupil(Versionable):
 
     __str__ = versionable_description
 
+
 @python_2_unicode_compatible
 class Teacher(Versionable):
     name = CharField(max_length=200)
@@ -157,12 +169,14 @@ class C1(Versionable):
 
     __str__ = versionable_description
 
+
 @python_2_unicode_compatible
 class C2(Versionable):
     name = CharField(max_length=50)
     c3s = VersionedManyToManyField("C3", related_name='c2s')
 
     __str__ = versionable_description
+
 
 @python_2_unicode_compatible
 class C3(Versionable):
@@ -178,6 +192,7 @@ class Observer(Versionable):
     name = CharField(max_length=200)
 
     __str__ = versionable_description
+
 
 @python_2_unicode_compatible
 class Subject(Versionable):
@@ -218,12 +233,15 @@ class Wine(Model):
     def __str__(self):
         return "<" + str(self.__class__.__name__) + " object: " + str(
             self.name) + " (" + str(self.vintage) + ")>"
+
+
 @python_2_unicode_compatible
 class WineDrinker(Versionable):
     name = CharField(max_length=200)
     glass_content = ForeignKey(Wine, related_name='drinkers', null=True)
 
     __str__ = versionable_description
+
 
 @python_2_unicode_compatible
 class WineDrinkerHat(Model):
