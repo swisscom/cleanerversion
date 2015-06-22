@@ -33,7 +33,7 @@ setup(name='CleanerVersion',
       author_email='engineering.sophia@swisscom.com',
       license='Apache License 2.0',
       packages=find_packages(exclude=['cleanerversion', 'cleanerversion.*']),
-      url='https://github.com/boydjohnson/cleanerversion',
+      url='https://github.com/swisscom/cleanerversion',
       install_requires=['django'],
       package_data={'versions': ['static/js/*.js','templates/versions/*.html']},
       classifiers=[
