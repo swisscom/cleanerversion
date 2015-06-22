@@ -693,11 +693,12 @@ Note that M2M-relationships have not been extended yet to work in a heterogeneou
 VersionedAdmin admin for Django Admin
 =====================================
 
-VersionedAdmin has three boolean fields that allow subclasses to easily control if the shortened identity, the version end date,
-and the version start date show in the change view. These fields are list_display_show_identity, list_display_show_end_date,
-and list_display_show_start_date and by default they are set to True.
+VersionedAdmin has three boolean fields that allow subclasses to easily control if the shortened identity, the version
+end date, and the version start date show in the change view. These fields are ``list_display_show_identity``,
+``list_display_show_end_date``, and ``list_display_show_start_date`` and by default they are set to ``True``.
 
-Out of the box, VersionedAdmin allows for filtering the change view by the as_of queryset filter, and whether the object is current.
+Out of the box, VersionedAdmin allows for filtering the change view by the ``as_of`` queryset filter, and whether the
+object is current.
 
 Known Issues
 ============
