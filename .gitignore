@@ -5,6 +5,8 @@
 # Ignore IDE settings
 .idea
 *~
+.project
+.pydevproject
 
 # Ignore Vagrant stuff
 .vagrant/*
