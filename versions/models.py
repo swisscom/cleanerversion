@@ -831,7 +831,11 @@ class VersionedForeignRelatedObjectsDescriptor(ForeignRelatedObjectsDescriptor):
                     queryset = self.current.using(db)
                     with transaction.atomic(using=db, savepoint=False):
                         cloned_pks = [obj.clone().pk for obj in queryset]
-                        self._clear(self.current.filter(pk__in=cloned_pks), bulk)
+                        update_qs = self.current.filter(pk__in=cloned_pks)
+                        if VERSION[:2] == (1, 6):
+                            update_qs.update(**{rel_field.name: None})
+                        else:
+                            self._clear(update_qs, bulk)
 
             if 'remove' in dir(manager_cls):
                 def remove(self, *objs):
