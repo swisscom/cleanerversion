@@ -382,8 +382,7 @@ class VersionedExtraWhere(ExtraWhere):
         # By here, the sql string is defined if an as_of_time was provided
         if self._joined_alias:
             sql = sql.format(alias=self._joined_alias)
-        else:
-            pass #was erroring when filtering on a Foreign key off of a models.Model class
+
 
         # Set the final sqls
         # self.sqls needs to be set before the call to parent
