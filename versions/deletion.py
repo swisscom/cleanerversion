@@ -139,7 +139,10 @@ class VersionedCollector(Collector):
             related_model = related.related_model
         else:
             related_model = related.model
-        return related_model._base_manager.current.using(self.using).filter(
+        manager = related_model._base_manager
+        if issubclass(related_model, versions.models.Versionable):
+            manager = manager.current
+        return manager.using(self.using).filter(
             **{"%s__in" % related.field.name: objs}
         )
 

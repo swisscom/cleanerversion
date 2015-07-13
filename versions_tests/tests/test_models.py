@@ -186,6 +186,13 @@ class DeletionTest(TestCase):
         # None of the objects should have been deleted, because they are not current.
         self.assertEqual(2, B.objects.all().filter(pk__in=pks).count())
 
+    def test_delete_related_with_non_versionable(self):
+        jackie = WineDrinker.objects.create(name='Jackie')
+        red_sailor_hat = WineDrinkerHat.objects.create(shape='Sailor', color='red', wearer=jackie)
+        jackie.delete()
+        self.assertEqual(WineDrinkerHat.objects.count(), 0)
+        self.assertEqual(WineDrinker.objects.current.count(), 0)
+
 
 class DeletionHandlerTest(TestCase):
     """Tests that the ForeignKey on_delete parameters have the expected effects"""
