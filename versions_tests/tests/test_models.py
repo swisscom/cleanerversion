@@ -2167,9 +2167,9 @@ class FilterOnForeignKeyRelationTest(TestCase):
         michael.save()
         baseball_hat.save()
         hat = WineDrinkerHat.objects.filter(wearer__name='michael')
-        self.assertEqual(hat, baseball_hat)
+        self.assertEqual(hat.pk, baseball_hat.pk)
         person = WineDrinker.objects.filter(hats__shape='baseball hat')
-        self.assertEqual(person, michael)
+        self.assertEqual(person.pk, michael.pk)
 
 class SpecifiedUUIDTest(TestCase):
 
