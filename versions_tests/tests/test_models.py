@@ -2161,6 +2161,16 @@ class FilterOnForeignKeyRelationTest(TestCase):
         l2 = len(Player.objects.as_of(t1).filter(team__name='team'))
         self.assertEqual(l1, l2)
 
+    def test_filter_on_fk_versioned_and_nonversioned_join(self):
+        michael = WineDrinker.objects.create(name='michael', glass_content=Wine.objects.create(name='Port',vintage='2013'))
+        baseball_hat = WineDrinkerHat.objects.create(shape='baseball hat', color='blue', wearer=michael)
+        michael.save()
+        baseball_hat.save()
+        hat = WineDrinkerHat.objects.filter(wearer__name='michael')
+        self.assertEqual(hat, baseball_hat)
+        person = WineDrinker.objects.filter(hats__shape='baseball hat')
+        self.assertEqual(person, michael)
+
 class SpecifiedUUIDTest(TestCase):
 
     @staticmethod
