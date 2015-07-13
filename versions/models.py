@@ -383,7 +383,7 @@ class VersionedExtraWhere(ExtraWhere):
         if self._joined_alias:
             sql = sql.format(alias=self._joined_alias)
         else:
-            pass
+            pass #was erroring when filtering on a Foreign key off of a models.Model class
 
         # Set the final sqls
         # self.sqls needs to be set before the call to parent
