@@ -700,6 +700,34 @@ end date, and the version start date show in the change view. These fields are `
 Out of the box, VersionedAdmin allows for filtering the change view by the ``as_of`` queryset filter, and whether the
 object is current.
 
+Upgrade notes
+=============
+CleanerVersion 1.6.0 / Django 1.8.3
+-----------------------------------
+Starting with CleanerVersion 1.6.0, Django's ``UUIDField`` will be used for the ``id``, ``identity``,
+and ``VersionedForeignKey`` columns if the Django version is 1.8.3 or greater.
+
+If you are upgrading from lower versions of CleanerVersion or Django, you have two choices:
+
+1. Add a setting to your project so that CleanerVersion will continue to use ``CharField`` for ``Versionable``'s
+   UUID fields. Add this to your project's settings::
+
+       VERSIONS_USE_UUIDFIELD = False
+
+This value defaults to ``True`` if not explicitly set when using Django >= 1.8.3.
+
+2. Convert all of the relevant database fields to the type and size that Django uses for UUID fields for the
+   database that you are using.  This may be possible using Django's migrations, or could be done manually by
+   altering the column type as necessary for your database type for all the  ``id``, ``identity``, and
+   foreign key columns of your ``Versionable`` models (don't forget the auto-generated many-to-many tables).
+   This is not a trivial undertaking; it will involve for example dropping and recreating constraints.
+   An example of column altering syntax for PostgreSQL::
+
+       ALTER TABLE blog_author ALTER COLUMN id type uuid USING id:uuid;
+       ALTER TABLE blog_author ALTER COLUMN identity type uuid USING identity:uuid;
+
+You must choose one or the other solution; not doing so will result in your application no longer working.
+
 Known Issues
 ============
 
