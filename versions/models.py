@@ -784,6 +784,7 @@ class VersionedReverseSingleRelatedObjectDescriptor(ReverseSingleRelatedObjectDe
 class VersionedForeignRelatedObjectsDescriptor(ForeignRelatedObjectsDescriptor):
     """
     This descriptor generates the manager class that is used on the related object of a ForeignKey relation
+    (i.e. the reverse-ForeignKey field manager).
     """
 
     @cached_property
@@ -817,6 +818,24 @@ class VersionedForeignRelatedObjectsDescriptor(ForeignRelatedObjectsDescriptor):
                         raise TypeError("Trying to add a non-Versionable to a VersionedForeignKey relationship")
                     cloned_objs += (obj.clone(),)
                 super(VersionedRelatedManager, self).add(*cloned_objs)
+
+            # clear() and remove() are present if the FK is nullable
+            if 'clear' in dir(manager_cls):
+                def clear(self, **kwargs):
+                    """
+                    Overridden to ensure that the current queryset is used, and to clone objects before they
+                    are removed, so that history is not lost.
+                    """
+                    bulk = kwargs.pop('bulk', True)
+                    db = router.db_for_write(self.model, instance=self.instance)
+                    queryset = self.current.using(db)
+                    with transaction.atomic(using=db, savepoint=False):
+                        cloned_pks = [obj.clone().pk for obj in queryset]
+                        update_qs = self.current.filter(pk__in=cloned_pks)
+                        if VERSION[:2] == (1, 6):
+                            update_qs.update(**{rel_field.name: None})
+                        else:
+                            self._clear(update_qs, bulk)
 
             if 'remove' in dir(manager_cls):
                 def remove(self, *objs):

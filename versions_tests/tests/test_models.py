@@ -1854,6 +1854,88 @@ class HistoricM2MOperationsTests(TestCase):
         self.big_brother.subjects.all().first()
 
 
+class M2MDirectAssignmentTests(TestCase):
+    def setUp(self):
+        self.o1 = Observer.objects.create(name="1.0")
+        self.s1 = Subject.objects.create(name="1.0")
+        self.s2 = Subject.objects.create(name="2.0")
+        self.t1 = get_utc_now()
+        self.o1 = self.o1.clone()
+        self.o1.name = "1.1"
+        self.o1.save()
+        self.o1.subjects.add(self.s1, self.s2)
+        self.t2 = get_utc_now()
+        self.o1 = self.o1.clone()
+        self.o1.name = "1.2"
+        self.o1.save()
+        self.o1.subjects = []
+        self.t3 = get_utc_now()
+
+    def test_t1_relations(self):
+        observer = Observer.objects.as_of(self.t1).filter(identity=self.o1.identity).first()
+        self.assertEqual(0, observer.subjects.all().count())
+
+    def test_t2_relations(self):
+        observer = Observer.objects.as_of(self.t2).filter(identity=self.o1.identity).first()
+        self.assertEqual(2, observer.subjects.all().count())
+
+    def test_t3_relations(self):
+        observer = Observer.objects.as_of(self.t3).filter(identity=self.o1.identity).first()
+        self.assertEqual(0, observer.subjects.all().count())
+
+
+class ReverseForeignKeyDirectAssignmentTests(TestCase):
+    def setUp(self):
+        # City is the referenced object, Team in the referring object.
+        # c1 will be explicitly cloned, but not it's teams.
+        # c10 will not be explicitly cloned, but one of it's teams will be.
+        self.c1 = City.objects.create(name="Oakland")
+        self.team1 = Team.objects.create(name="As")
+        self.team2 = Team.objects.create(name="Raiders")
+
+        self.c10 = City.objects.create(name="San Francisco")
+        self.team10 = Team.objects.create(name="Giants")
+        self.team11 = Team.objects.create(name="49ers")
+
+        self.t1 = get_utc_now()
+        self.c1 = self.c1.clone()
+        self.c1.team_set.add(self.team1, self.team2)
+
+        self.team10 = self.team10.clone()
+        self.c10.team_set.add(self.team10, self.team11)
+
+        self.t2 = get_utc_now()
+        self.c1 = self.c1.clone()
+        self.c1.team_set = []
+
+        self.team10 = Team.objects.current.get(identity=self.team10.identity).clone()
+        self.c10.team_set = []
+        self.t3 = get_utc_now()
+
+    def test_t1_relations_for_cloned_referenced_object(self):
+        city = City.objects.as_of(self.t1).filter(identity=self.c1.identity).first()
+        self.assertEqual(0, city.team_set.all().count())
+
+    def test_t2_relations_for_cloned_referenced_object(self):
+        city = City.objects.as_of(self.t2).filter(identity=self.c1.identity).first()
+        self.assertEqual(2, city.team_set.all().count())
+
+    def test_t3_relations_for_cloned_referenced_object(self):
+        city = City.objects.as_of(self.t3).filter(identity=self.c1.identity).first()
+        self.assertEqual(0, city.team_set.all().count())
+
+    def test_t1_relations_for_cloned_referring_object(self):
+        city = City.objects.as_of(self.t1).filter(identity=self.c10.identity).first()
+        self.assertEqual(0, city.team_set.all().count())
+
+    def test_t2_relations_for_cloned_referring_object(self):
+        city = City.objects.as_of(self.t2).filter(identity=self.c10.identity).first()
+        self.assertEqual(2, city.team_set.all().count())
+
+    def test_t3_relations_for_cloned_referring_object(self):
+        city = City.objects.as_of(self.t3).filter(identity=self.c10.identity).first()
+        self.assertEqual(0, city.team_set.all().count())
+
 class PrefetchingTests(TestCase):
     def setUp(self):
         self.city1 = City.objects.create(name='Chicago')
