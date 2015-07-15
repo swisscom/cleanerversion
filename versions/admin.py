@@ -166,19 +166,32 @@ class VersionedAdmin(admin.ModelAdmin):
         list_filter = super(VersionedAdmin, self).get_list_filter(request)
         return list_filter + (('version_start_date', DateTimeFilter), IsCurrentFilter)
 
-    def restore(self, request, *args, **kwargs):
-        return True
+    def restore(self,request, *args, **kwargs):
+        """
+        View for restoring object from change view
+        """
+        paths = request.path_info.split('/')
+        object_id_index = paths.index("restore") - 1
+        object_id = paths[object_id_index]
+
+        obj = super(VersionedAdmin,self).get_object(request, object_id)
+        obj.restore()
+        admin_wordIndex = object_id_index - 3
+        path = "/%s" % ("/".join(paths[admin_wordIndex:object_id_index]))
+        return HttpResponseRedirect(path)
 
     def will_not_clone(self, request, *args, **kwargs):
         """
         Add save but not clone capability in the changeview
         """
         paths = request.path_info.split('/')
-
-        object_id = paths[3]
+        index_of_object_id = paths.index("will_not_clone")-1
+        object_id = paths[index_of_object_id]
         self.change_view(request, object_id)
+
+        admin_wordInUrl = index_of_object_id-3
         # This gets the adminsite for the app, and the model name and joins together with /
-        path = '/' + '/'.join(paths[1:3])
+        path = '/' + '/'.join(paths[admin_wordInUrl:index_of_object_id])
         return HttpResponseRedirect(path)
 
     @property
@@ -201,7 +214,8 @@ class VersionedAdmin(admin.ModelAdmin):
         """
         obj = super(VersionedAdmin, self).get_object(request, object_id)  # from_field breaks in 1.7.8
         # Only clone if update view as get_object() is also called for change, delete, and history views
-        if request.method == 'POST' and obj and obj.is_latest and 'will_not_clone' not in request.path and 'delete' not in request.path:
+        if request.method == 'POST' and obj and obj.is_latest and 'will_not_clone' not in request.path \
+                and 'delete' not in request.path and 'restore' not in request.path:
             obj = obj.clone()
 
         return obj
@@ -246,7 +260,8 @@ class VersionedAdmin(admin.ModelAdmin):
         Appends the custom will_not_clone url to the admin site
         """
         not_clone_url = [url(r'^(.+)/will_not_clone/$', admin.site.admin_view(self.will_not_clone))]
-        return not_clone_url + super(VersionedAdmin, self).get_urls()
+        restore_url = [url(r'^(.+)/restore/$', admin.site.admin_view(self.restore))]
+        return not_clone_url + restore_url + super(VersionedAdmin, self).get_urls()
 
     def is_current(self, obj):
         return obj.is_current

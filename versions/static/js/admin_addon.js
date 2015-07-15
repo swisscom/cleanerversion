@@ -9,11 +9,12 @@ function update_document() {
 
 }
 
-function make_restore_button() {
-    (function ($) {
-        if ($('ul').hasClass('object-tools')) {
-            if ($('div.field-id p').text() != $('div.field-identity p').text()) {
-                $('input[name="_addanother"]').before('<input formaction="restore/" type="submit" formmethod="POST" value="Restore"');
+
+function make_restore_button(){
+    (function($){
+        if($('ul').hasClass('object-tools')){
+            if($('div.field-is_current img').attr('alt').valueOf()=="False"){
+                $('input[name="_addanother"]').before('<input formaction="restore/" type="submit" formmethod="POST" value="Restore">');
             }
         }
     })(django.jQuery)
