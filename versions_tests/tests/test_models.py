@@ -2231,6 +2231,15 @@ class IntegrationNonVersionableModelsTests(TestCase):
         should_be_jacques_t1 = should_be_jacques.__class__.objects.as_of(self.t1).get(identity=should_be_jacques.identity)
         self.assertEqual(jacques_t1, should_be_jacques_t1)
 
+    def test_filter_on_fk_versioned_and_nonversioned_join(self):
+        # Get non-versioned objects, filtering on a FK-related versioned object
+        jacques_hats = WineDrinkerHat.objects.filter(wearer__name='Jacques').distinct()
+        self.assertEqual(set(jacques_hats), set([self.green_vagabond_hat, self.red_sailor_hat]))
+
+        # Get all versions of a Versionable by filtering on a FK-related non-versioned object
+        person_versions = WineDrinker.objects.filter(hats__shape='Vagabond')
+        self.assertIn(self.jacques, person_versions)
+
 
 class FilterOnForeignKeyRelationTest(TestCase):
     def test_filter_on_fk_relation(self):
@@ -2242,6 +2251,7 @@ class FilterOnForeignKeyRelationTest(TestCase):
         team.clone()
         l2 = len(Player.objects.as_of(t1).filter(team__name='team'))
         self.assertEqual(l1, l2)
+
 
 class SpecifiedUUIDTest(TestCase):
 

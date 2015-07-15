@@ -366,6 +366,10 @@ class VersionedExtraWhere(ExtraWhere):
         sql = ""
         params = []
 
+        # Fail fast for inacceptable cases
+        if self._as_of_time_set and not self._joined_alias:
+            raise ValueError("joined_alias is not set, but as_of is; this is a conflict!")
+
         # Set the SQL string in dependency of whether as_of_time was set or not
         if self._as_of_time_set:
             if self.as_of_time:
@@ -382,8 +386,6 @@ class VersionedExtraWhere(ExtraWhere):
         # By here, the sql string is defined if an as_of_time was provided
         if self._joined_alias:
             sql = sql.format(alias=self._joined_alias)
-        else:
-            raise ValueError("joined_alias not set")
 
         # Set the final sqls
         # self.sqls needs to be set before the call to parent
