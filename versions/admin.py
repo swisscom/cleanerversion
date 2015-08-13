@@ -13,7 +13,7 @@ from django.utils.encoding import force_text
 from django.utils.text import capfirst
 from django.template.response import TemplateResponse
 from django import VERSION
-
+from datetime import datetime
 
 class DateTimeFilterForm(forms.Form):
     def __init__(self, request, *args, **kwargs):
@@ -52,6 +52,7 @@ class DateTimeFilter(admin.FieldListFilter):
     title = 'DateTime filter'
 
     def __init__(self, field, request, params, model, model_admin, field_path):
+        self.field_path = field_path
         self.lookup_kwarg_as_ofdate = '%s_as_of_0' % field_path
         self.lookup_kwarg_as_oftime = '%s_as_of_1' % field_path
         super(DateTimeFilter, self).__init__(field, request, params, model, model_admin, field_path)
@@ -67,8 +68,9 @@ class DateTimeFilter(admin.FieldListFilter):
         return DateTimeFilterForm(request, data=self.used_parameters, field_name=self.field_path)
 
     def queryset(self, request, queryset):
-        if self.form.is_valid() and self.form.cleaned_data.values()[0] is not None:
-            filter_params = self.form.cleaned_data.values()[0]
+        fieldname = '%s_as_of' % self.field_path
+        if self.form.is_valid() and fieldname in self.form.cleaned_data:
+            filter_params = self.form.cleaned_data.get(fieldname, datetime.utcnow())
             return queryset.as_of(filter_params)
         else:
             return queryset
