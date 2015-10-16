@@ -133,7 +133,7 @@ class VersionedAdmin(admin.ModelAdmin):
         This is required a subclass of VersionedAdmin has readonly_fields ours won't be undone
         """
         if obj:
-            return self.readonly_fields + ('id', 'identity', 'is_current',)
+            return list(self.readonly_fields) + ['id', 'identity', 'is_current']
         return self.readonly_fields
 
     def get_ordering(self, request):
@@ -164,7 +164,7 @@ class VersionedAdmin(admin.ModelAdmin):
         Adds versionable custom filtering ability to changelist
         """
         list_filter = super(VersionedAdmin, self).get_list_filter(request)
-        return list_filter + (('version_start_date', DateTimeFilter), IsCurrentFilter)
+        return list(list_filter) + [('version_start_date', DateTimeFilter), IsCurrentFilter]
 
     def restore(self,request, *args, **kwargs):
         """
