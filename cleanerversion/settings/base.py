@@ -65,6 +65,7 @@ INSTALLED_APPS = (
     'django.contrib.staticfiles',
     'versions',
     'versions_tests',
+    'migrations_tests',
 )
 
 MIDDLEWARE_CLASSES = (
@@ -90,4 +91,3 @@ ROOT_URLCONF = 'cleanerversion.urls'
 
 
 STATIC_URL = '/static/'
-

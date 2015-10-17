@@ -23,6 +23,7 @@ addons:
 install:
   - pip install tox
   - pip install coveralls
+  - pip install django-migration-testcase
 
 # Ensure PostgreSQL-DB to be configured correctly
 before_script:
