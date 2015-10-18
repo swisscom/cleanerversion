@@ -1,28 +1,9 @@
 import os
 import re
-from django.apps import apps
+
 from django.core.management import call_command
-from django.db.migrations.loader import MigrationLoader
 from django_migration_testcase import MigrationTest
-from django.db import migrations
-import sys
-import versions
 
-
-class Migration(migrations.Migration):
-
-    dependencies = [
-        ('migrations_tests', '0001_initial'),
-    ]
-
-    operations = [
-        migrations.AlterField(
-            model_name='mymigratingmodelb',
-            name='a_models',
-            field=versions.models.VersionedManyToManyField(related_name='b_models', to='migrations_tests.MyMigratingModelA'),
-            preserve_default=True,
-        ),
-    ]
 
 class M2MRelatedNameMigration(MigrationTest):
     app = 'migrations_tests'

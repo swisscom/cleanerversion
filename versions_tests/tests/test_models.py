@@ -27,6 +27,7 @@ from django.db.models.deletion import ProtectedError
 from django.test import TestCase
 from django.utils.timezone import utc
 from django.utils import six
+
 from django import VERSION
 
 from versions.exceptions import DeletionOfNonCurrentVersionError
@@ -38,7 +39,6 @@ from versions_tests.models import (
 
 
 def get_relation_table(model_class, fieldname):
-
     if VERSION[:2] >= (1, 8):
         field_object = model_class._meta.get_field(fieldname)
         direct = not field_object.auto_created or field_object.concrete
@@ -74,10 +74,11 @@ def set_up_one_object_with_3_versions():
 
     return b, t1, t2, t3
 
+
 def create_three_current_objects():
-    b1 = B.objects.create(name = '1')
-    b2 = B.objects.create(name = '2')
-    b3 = B.objects.create(name = '3')
+    b1 = B.objects.create(name='1')
+    b2 = B.objects.create(name='2')
+    b3 = B.objects.create(name='3')
     return b1, b2, b3
 
 
@@ -283,6 +284,7 @@ class DeletionHandlerTest(TestCase):
         self.assertEqual(1, through.objects.filter(player_id=p1.pk).count())
         self.assertEqual(0, through.objects.current.filter(player_id=p1.pk).count())
 
+
 class CurrentVersionTest(TestCase):
     def setUp(self):
         self.b, self.t1, self.t2, self.t3 = set_up_one_object_with_3_versions()
@@ -363,7 +365,6 @@ class VersionedQuerySetTest(TestCase):
         o = B.objects.as_of(t2).first()
         self.assertEqual('v2', o.name)
 
-
     def test_queryset_using_delete(self):
         """
         Creates 3 objects with all current and then tests that the delete method
@@ -374,12 +375,12 @@ class VersionedQuerySetTest(TestCase):
         self.assertEqual(True, b2.is_current)
         self.assertEqual(True, b3.is_current)
 
-        qs = B.objects.filter(name__in = ['1','2','3']).all()
+        qs = B.objects.filter(name__in=['1', '2', '3']).all()
         qs.delete()
 
-        b1 = B.objects.get(name = '1')
-        b2 = B.objects.get(name = '2')
-        b3 = B.objects.get(name = '3')
+        b1 = B.objects.get(name='1')
+        b2 = B.objects.get(name='2')
+        b3 = B.objects.get(name='3')
         self.assertEqual(False, b1.is_current)
         self.assertEqual(False, b2.is_current)
         self.assertEqual(False, b3.is_current)
@@ -1311,18 +1312,18 @@ class MultiM2MTest(TestCase):
         self.assertEqual(4,
                          Professor.objects.current.annotate(num_students=Count('students')).aggregate(
                              sum=Sum('num_students'))['sum']
-        )
+                         )
         self.assertTupleEqual((1, 1),
                               (Professor.objects.current.annotate(num_students=Count('students')).get(
                                   name='Mr. Biggs').num_students,
                                Professor.objects.current.get(name='Mr. Biggs').students.count())
-        )
+                              )
 
         self.assertTupleEqual((2, 2),
                               (Professor.objects.as_of(self.t1).annotate(num_students=Count('students')).get(
                                   name='Mr. Biggs').num_students,
                                Professor.objects.as_of(self.t1).get(name='Mr. Biggs').students.count())
-        )
+                              )
 
         # Results should include records for which the annotation returns a 0 count, too.
         # This requires that the generated LEFT OUTER JOIN condition includes a clause
@@ -1936,6 +1937,7 @@ class ReverseForeignKeyDirectAssignmentTests(TestCase):
         city = City.objects.as_of(self.t3).filter(identity=self.c10.identity).first()
         self.assertEqual(0, city.team_set.all().count())
 
+
 class PrefetchingTests(TestCase):
     def setUp(self):
         self.city1 = City.objects.create(name='Chicago')
@@ -2228,7 +2230,8 @@ class IntegrationNonVersionableModelsTests(TestCase):
 
         # For the records: navigate to a prior version of a versionable object ('Jacques') as follows
         # TODO: Issue #33 on Github aims for a more direct syntax to get to another version of the same object
-        should_be_jacques_t1 = should_be_jacques.__class__.objects.as_of(self.t1).get(identity=should_be_jacques.identity)
+        should_be_jacques_t1 = should_be_jacques.__class__.objects.as_of(self.t1).get(
+            identity=should_be_jacques.identity)
         self.assertEqual(jacques_t1, should_be_jacques_t1)
 
     def test_filter_on_fk_versioned_and_nonversioned_join(self):
@@ -2254,7 +2257,6 @@ class FilterOnForeignKeyRelationTest(TestCase):
 
 
 class SpecifiedUUIDTest(TestCase):
-
     @staticmethod
     def uuid4():
         return six.text_type(str(uuid.uuid4()))
@@ -2270,7 +2272,6 @@ class SpecifiedUUIDTest(TestCase):
             Person.objects.create(id=p_id, name="Alexis")
 
     def test_create_with_forced_identity(self):
-
         # This test does some artificial manipulation of versioned objects, do not use it as an example
         # for real-life usage!
 
@@ -2297,7 +2298,6 @@ class SpecifiedUUIDTest(TestCase):
 
 
 class VersionRestoreTest(TestCase):
-
     def setup_common(self):
         sf = City.objects.create(name="San Francisco")
         forty_niners = Team.objects.create(name='49ers', city=sf)
@@ -2457,7 +2457,6 @@ class VersionRestoreTest(TestCase):
 
 
 class DetachTest(TestCase):
-
     def test_simple_detach(self):
         c1 = City.objects.create(name="Atlantis").clone()
         c1_identity = c1.identity
