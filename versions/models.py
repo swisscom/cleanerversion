@@ -19,6 +19,7 @@ from collections import namedtuple
 import re
 
 from django import VERSION
+import django
 
 if VERSION[:2] >= (1, 8):
     from django.db.models.sql.datastructures import Join
@@ -686,6 +687,7 @@ class VersionedManyToManyField(ManyToManyField):
         """
         super(VersionedManyToManyField, self).contribute_to_related_class(cls, related)
         accessor_name = related.get_accessor_name()
+        # Override the remote accessor if it's already there (created by the overridden method)
         if accessor_name and hasattr(cls, accessor_name):
             descriptor = VersionedManyRelatedObjectsDescriptor(related, accessor_name)
             setattr(cls, accessor_name, descriptor)
@@ -693,6 +695,7 @@ class VersionedManyToManyField(ManyToManyField):
                 cls._meta.many_to_many_related.append(descriptor)
             else:
                 cls._meta.many_to_many_related = [descriptor]
+        self._m2m_reverse_name_cache = related.parent_model._meta.model_name
 
     @staticmethod
     def create_versioned_many_to_many_intermediary_model(field, cls, field_name):

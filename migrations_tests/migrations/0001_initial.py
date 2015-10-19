@@ -42,6 +42,27 @@ class Migration(migrations.Migration):
             },
             bases=(models.Model,),
         ),
+        migrations.CreateModel(
+            name='MyPlainModelA',
+            fields=[
+                ('id', models.AutoField(verbose_name='ID', serialize=False, auto_created=True, primary_key=True)),
+                ('property_one', models.CharField(max_length=10)),
+            ],
+            options={
+            },
+            bases=(models.Model,),
+        ),
+        migrations.CreateModel(
+            name='MyPlainModelB',
+            fields=[
+                ('id', models.AutoField(verbose_name='ID', serialize=False, auto_created=True, primary_key=True)),
+                ('property_one', models.CharField(max_length=10)),
+                ('a_models', models.ManyToManyField(related_name='plain_bb_models', to='migrations_tests.MyPlainModelA')),
+            ],
+            options={
+            },
+            bases=(models.Model,),
+        ),
         migrations.AlterUniqueTogether(
             name='mymigratingmodelb',
             unique_together=set([('id', 'identity')]),
