@@ -1515,6 +1515,9 @@ class SelfReferencingManyToManyTest(TestCase):
         for person in [maude, max]:
             self.assertEqual('Mips', person.children.first().name)
 
+    def test_relationship_spanning_query(self):
+        mips_parents_qs = Person.objects.current.filter(children__name='Mips')
+        self.assertSetEqual({'Max', 'Maude'}, {p.name for p in mips_parents_qs})
 
 class ManyToManyFilteringTest(TestCase):
     def setUp(self):
