@@ -641,6 +641,53 @@ class OneToManyTest(TestCase):
         team_at_t2 = Team.objects.as_of(t2).first()
         self.assertEqual(2, team_at_t2.player_set.count())
 
+    def test_finding_object_with_historic_foreign_key(self):
+        t1 = get_utc_now()
+        sleep(0.01)
+        team = self.team.clone()
+        team.name = 't.v2'
+        team.save()
+        t2 = get_utc_now()
+        sleep(0.01)
+        team = team.clone()
+        team.name = 't.v3'
+        team.save()
+        team_at_t1 = Team.objects.as_of(t1).get(identity=team.identity)
+        team_at_t2 = Team.objects.as_of(t2).get(identity=team.identity)
+        team_current = Team.objects.current.get(identity=team.identity)
+
+        # self.p1's foreign key to self.team is it's original value, which is equal
+        # to team_at_t1's identity, but not (any longer) team_at_t1's id.
+
+        # The following queries should all work to return the self.p1 Player:
+
+        # Using a cross-relation lookup on a non-identity field (team__name):
+        player_p1_lookup = Player.objects.as_of(t1).get(team__name=team_at_t1.name, name='p1.v1')
+        self.assertEqual(self.p1, player_p1_lookup)
+
+        # Explicitly specifying the identity field in the lookup:
+        player_p1_explicit = Player.objects.as_of(t1).get(team__identity=team_at_t1.identity, name='p1.v1')
+        self.assertEqual(self.p1, player_p1_explicit)
+
+        # The following three all work because the foreign key actually refers to the identity
+        # field of the foreign object (which equals the identity of the current object).
+
+        # Providing the current related object to filter on:
+        player_p1_obj_current = Player.objects.as_of(t1).get(team=team_current, name='p1.v1')
+        self.assertEqual(self.p1, player_p1_obj_current)
+        self.assertEqual(team_at_t1, player_p1_obj_current.team)
+
+        # Providing the related object that existed at the as_of time:
+        player_p1_obj_as_of = Player.objects.as_of(t1).get(team=team_at_t1, name='p1.v1')
+        self.assertEqual(self.p1, player_p1_obj_as_of)
+        self.assertEqual(team_at_t1, player_p1_obj_as_of.team)
+
+        # Providing the related object that is neither current, nor the one that existed
+        # at the as_of time, but that has the same identity.
+        player_p1_obj_other_version = Player.objects.as_of(t1).get(team=team_at_t2, name='p1.v1')
+        self.assertEqual(self.p1, player_p1_obj_other_version)
+        self.assertEqual(team_at_t1, player_p1_obj_other_version.team)
+
     def test_creating_new_version_of_the_player(self):
         t1 = get_utc_now()
         sleep(0.1)
