@@ -1447,25 +1447,25 @@ class MultiM2MTest(TestCase):
         # - 4 of them are pointing the previous annika-object (including the non-current link to Mr. Biggs)
         # - 3 of them are pointing the current annika-object (only current links were taken over)
         student_professor_links = list(student_professors_mgr.through.objects.filter(
-            Q(**{student_professors_mgr.source_field_name: annika_pre_clone}) |
-            Q(**{student_professors_mgr.source_field_name: annika_post_clone})))
+            Q(**{student_professors_mgr.source_field_name: annika_pre_clone.id}) |
+            Q(**{student_professors_mgr.source_field_name: annika_post_clone.id})))
         self.assertEqual(7, len(student_professor_links))
         self.assertEqual(4, student_professors_mgr.through.objects.filter(
-            Q(**{student_professors_mgr.source_field_name: annika_pre_clone})).count())
+            Q(**{student_professors_mgr.source_field_name: annika_pre_clone.id})).count())
         self.assertEqual(3, student_professors_mgr.through.objects.filter(
-            Q(**{student_professors_mgr.source_field_name: annika_post_clone})).count())
+            Q(**{student_professors_mgr.source_field_name: annika_post_clone.id})).count())
 
         # There are 6 links to 3 professors
         # - 3 of them are pointing the previous annika-object
         # - 3 of them are pointing the current annika-object
         student_classroom_links = list(student_classrooms_mgr.through.objects.filter(
-            Q(**{student_classrooms_mgr.source_field_name: annika_pre_clone}) |
-            Q(**{student_classrooms_mgr.source_field_name: annika_post_clone})))
+            Q(**{student_classrooms_mgr.source_field_name: annika_pre_clone.id}) |
+            Q(**{student_classrooms_mgr.source_field_name: annika_post_clone.id})))
         self.assertEqual(6, len(student_classroom_links))
         self.assertEqual(3, student_classrooms_mgr.through.objects.filter(
-            Q(**{student_classrooms_mgr.source_field_name: annika_pre_clone})).count())
+            Q(**{student_classrooms_mgr.source_field_name: annika_pre_clone.id})).count())
         self.assertEqual(3, student_classrooms_mgr.through.objects.filter(
-            Q(**{student_classrooms_mgr.source_field_name: annika_post_clone})).count())
+            Q(**{student_classrooms_mgr.source_field_name: annika_post_clone.id})).count())
 
 
 class MultiM2MToSameTest(TestCase):
