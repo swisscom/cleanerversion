@@ -28,6 +28,7 @@ from django.core.exceptions import SuspiciousOperation, ObjectDoesNotExist
 from django.db import transaction
 from django.db.models.base import Model
 from django.db.models import Q
+from django.db.models.constants import LOOKUP_SEP
 from django.db.models.fields import FieldDoesNotExist
 from django.db.models.fields.related import (ForeignKey, ReverseSingleRelatedObjectDescriptor,
                                              ReverseManyRelatedObjectsDescriptor, ManyToManyField,
@@ -439,6 +440,46 @@ class VersionedQuery(Query):
             # just not very comfortable to read)
             self._querytime_filter_added = True
         return super(VersionedQuery, self).get_compiler(*args, **kwargs)
+
+    def build_filter(self, filter_expr, **kwargs):
+        """
+        When a query is filtered with an expression like .filter(team=some_team_object),
+        where team is a VersionedForeignKey field, and some_team_object is a Versionable object,
+        adapt the filter value to be (team__identity=some_team_object.identity).
+
+        When the query is built, this will enforce that the tables are joined and that
+        the identity column and the as_of restriction is used for matching.
+
+        For example, the generated SQL will be like:
+
+           SELECT ... FROM foo INNER JOIN team ON (
+                foo.team_id == team.identity
+                AND foo.version_start_date <= [as_of]
+                AND (foo.version_end_date > [as_of] OR foo.version_end_date IS NULL)) ...
+
+        This is not necessary, and won't be applied, if any of these are true:
+        - no as_of is in effect
+        - the current objects are being queried (e.g. foo.objects.current.filter(...))
+        - a terminal object is being used as the lookup value (e.g. .filter(team=the_deleted_team_version)
+        - the lookup value is not a Versionable (e.g. .filter(foo='bar') or .filter(team=non_versionable_team)
+
+        Note that this has the effect that Foo.objects.as_of(t1).filter(team=team_object_at_t3) will
+        return the Foo objects at t1, and that accessing their team field (e.g. foo.team) will return
+        the team object that was associated with them at t1, which may be a different object than
+        team_object_at_t3.
+
+        The goal is to make expressions like Foo.objects.as_of(tx).filter(team=some_team_object) work as
+        closely as possible to standard, non-versioned Django querysets like Foo.objects.filter(team=some_team_object).
+
+        :param filter_expr:
+        :param kwargs:
+        :return: tuple
+        """
+        lookup, value = filter_expr
+        if self.querytime.active and isinstance(value, Versionable) and not value.is_latest:
+            new_lookup = lookup + LOOKUP_SEP + Versionable.OBJECT_IDENTIFIER_FIELD
+            filter_expr = (new_lookup, value.identity)
+        return super(VersionedQuery, self).build_filter(filter_expr, **kwargs)
 
 
 class VersionedQuerySet(QuerySet):
