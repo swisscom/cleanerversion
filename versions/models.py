@@ -287,6 +287,10 @@ class VersionManager(models.Manager):
 class VersionedWhereNode(WhereNode):
     def as_sql(self, qn, connection):
         """
+        This method identifies joined table aliases in order for VersionedExtraWhere.as_sql()
+        to be able to add time restrictions for those tables based on the VersionedQuery's
+        querytime value.
+
         :param qn: In Django 1.7 & 1.8 this is a compiler; in 1.6, it's an instance-method
         :param connection: A DB connection
         :return: A tuple consisting of (sql_string, result_params)
