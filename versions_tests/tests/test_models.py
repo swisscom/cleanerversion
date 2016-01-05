@@ -1429,11 +1429,11 @@ class MultiM2MTest(TestCase):
         self.assertEqual(1, Student.objects.filter(identity=annika.identity).count())
         # There are 4 links to 3 professors (Mr. Biggs has been cloned once when setting up, thus 1 additional link)
         student_professor_links = list(student_professors_mgr.through.objects.filter(
-            **{student_professors_mgr.source_field_name: annika_pre_clone}))
+            **{student_professors_mgr.source_field_name: annika_pre_clone.id}))
         self.assertEqual(4, len(student_professor_links))
         # There are 3 links to classrooms
         student_classroom_links = list(student_classrooms_mgr.through.objects.filter(
-            **{student_classrooms_mgr.source_field_name: annika_pre_clone}))
+            **{student_classrooms_mgr.source_field_name: annika_pre_clone.id}))
         self.assertEqual(3, len(student_classroom_links))
 
         # Do the CLONE that also impacts the number of linking entries
