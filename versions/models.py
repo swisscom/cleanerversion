@@ -287,6 +287,10 @@ class VersionManager(models.Manager):
 class VersionedWhereNode(WhereNode):
     def as_sql(self, qn, connection):
         """
+        This method identifies joined table aliases in order for VersionedExtraWhere.as_sql()
+        to be able to add time restrictions for those tables based on the VersionedQuery's
+        querytime value.
+
         :param qn: In Django 1.7 & 1.8 this is a compiler; in 1.6, it's an instance-method
         :param connection: A DB connection
         :return: A tuple consisting of (sql_string, result_params)
@@ -302,25 +306,14 @@ class VersionedWhereNode(WhereNode):
                     _query = qn.__self__.query
                 query_time = _query.querytime.time
                 apply_query_time = _query.querytime.active
+                alias_map = _query.alias_map
                 # In Django 1.6 & 1.7, use the join_map to know, what *table* gets joined to which
                 # *left-hand sided* table
                 # In Django 1.8, use the Join objects in alias_map
                 if hasattr(_query, 'join_map'):
-                    for lhs, table, join_cols in _query.join_map:
-                        if (lhs == child.alias and table == child.related_alias) \
-                                or (lhs == child.related_alias and table == child.alias):
-                            child.set_joined_alias(table)
-                            break
+                    self._set_child_joined_alias_using_join_map(child, _query.join_map, alias_map)
                 else:
-                    for table in _query.alias_map:
-                        join = _query.alias_map[table]
-                        if not isinstance(join, Join):
-                            continue
-                        lhs = join.parent_alias
-                        if (lhs == child.alias and table == child.related_alias) \
-                                or (lhs == child.related_alias and table == child.alias):
-                            child.set_joined_alias(table)
-                            break
+                    self._set_child_joined_alias(child, alias_map)
                 if apply_query_time:
                     # Add query parameters that have not been added till now
                     child.set_as_of(query_time)
@@ -328,6 +321,49 @@ class VersionedWhereNode(WhereNode):
                     # Remove the restriction if it's not required
                     child.sqls = []
         return super(VersionedWhereNode, self).as_sql(qn, connection)
+
+    @staticmethod
+    def _set_child_joined_alias_using_join_map(child, join_map, alias_map):
+        """
+        Set the joined alias on the child, for Django <= 1.7.x.
+        :param child:
+        :param join_map:
+        :param alias_map:
+        """
+        for lhs, table, join_cols in join_map:
+            if lhs is None:
+                continue
+            if lhs == child.alias:
+                relevant_alias = child.related_alias
+            elif lhs == child.related_alias:
+                relevant_alias = child.alias
+            else:
+                continue
+
+            join_info = alias_map[relevant_alias]
+            if join_info.join_type is None:
+                continue
+
+            if join_info.lhs_alias in [child.alias, child.related_alias]:
+                child.set_joined_alias(relevant_alias)
+                break
+
+    @staticmethod
+    def _set_child_joined_alias(child, alias_map):
+        """
+        Set the joined alias on the child, for Django >= 1.8.0
+        :param child:
+        :param alias_map:
+        """
+        for table in alias_map:
+            join = alias_map[table]
+            if not isinstance(join, Join):
+                continue
+            lhs = join.parent_alias
+            if (lhs == child.alias and table == child.related_alias) \
+                    or (lhs == child.related_alias and table == child.alias):
+                child.set_joined_alias(table)
+                break
 
 
 class VersionedExtraWhere(ExtraWhere):
