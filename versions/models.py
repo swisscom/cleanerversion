@@ -28,6 +28,7 @@ from django.core.exceptions import SuspiciousOperation, ObjectDoesNotExist
 from django.db import transaction
 from django.db.models.base import Model
 from django.db.models import Q
+from django.db.models.constants import LOOKUP_SEP
 from django.db.models.fields import FieldDoesNotExist
 from django.db.models.fields.related import (ForeignKey, ReverseSingleRelatedObjectDescriptor,
                                              ReverseManyRelatedObjectsDescriptor, ManyToManyField,
@@ -287,6 +288,10 @@ class VersionManager(models.Manager):
 class VersionedWhereNode(WhereNode):
     def as_sql(self, qn, connection):
         """
+        This method identifies joined table aliases in order for VersionedExtraWhere.as_sql()
+        to be able to add time restrictions for those tables based on the VersionedQuery's
+        querytime value.
+
         :param qn: In Django 1.7 & 1.8 this is a compiler; in 1.6, it's an instance-method
         :param connection: A DB connection
         :return: A tuple consisting of (sql_string, result_params)
@@ -302,25 +307,14 @@ class VersionedWhereNode(WhereNode):
                     _query = qn.__self__.query
                 query_time = _query.querytime.time
                 apply_query_time = _query.querytime.active
+                alias_map = _query.alias_map
                 # In Django 1.6 & 1.7, use the join_map to know, what *table* gets joined to which
                 # *left-hand sided* table
                 # In Django 1.8, use the Join objects in alias_map
                 if hasattr(_query, 'join_map'):
-                    for lhs, table, join_cols in _query.join_map:
-                        if (lhs == child.alias and table == child.related_alias) \
-                                or (lhs == child.related_alias and table == child.alias):
-                            child.set_joined_alias(table)
-                            break
+                    self._set_child_joined_alias_using_join_map(child, _query.join_map, alias_map)
                 else:
-                    for table in _query.alias_map:
-                        join = _query.alias_map[table]
-                        if not isinstance(join, Join):
-                            continue
-                        lhs = join.parent_alias
-                        if (lhs == child.alias and table == child.related_alias) \
-                                or (lhs == child.related_alias and table == child.alias):
-                            child.set_joined_alias(table)
-                            break
+                    self._set_child_joined_alias(child, alias_map)
                 if apply_query_time:
                     # Add query parameters that have not been added till now
                     child.set_as_of(query_time)
@@ -328,6 +322,49 @@ class VersionedWhereNode(WhereNode):
                     # Remove the restriction if it's not required
                     child.sqls = []
         return super(VersionedWhereNode, self).as_sql(qn, connection)
+
+    @staticmethod
+    def _set_child_joined_alias_using_join_map(child, join_map, alias_map):
+        """
+        Set the joined alias on the child, for Django <= 1.7.x.
+        :param child:
+        :param join_map:
+        :param alias_map:
+        """
+        for lhs, table, join_cols in join_map:
+            if lhs is None:
+                continue
+            if lhs == child.alias:
+                relevant_alias = child.related_alias
+            elif lhs == child.related_alias:
+                relevant_alias = child.alias
+            else:
+                continue
+
+            join_info = alias_map[relevant_alias]
+            if join_info.join_type is None:
+                continue
+
+            if join_info.lhs_alias in [child.alias, child.related_alias]:
+                child.set_joined_alias(relevant_alias)
+                break
+
+    @staticmethod
+    def _set_child_joined_alias(child, alias_map):
+        """
+        Set the joined alias on the child, for Django >= 1.8.0
+        :param child:
+        :param alias_map:
+        """
+        for table in alias_map:
+            join = alias_map[table]
+            if not isinstance(join, Join):
+                continue
+            lhs = join.parent_alias
+            if (lhs == child.alias and table == child.related_alias) \
+                    or (lhs == child.related_alias and table == child.alias):
+                child.set_joined_alias(table)
+                break
 
 
 class VersionedExtraWhere(ExtraWhere):
@@ -439,6 +476,46 @@ class VersionedQuery(Query):
             # just not very comfortable to read)
             self._querytime_filter_added = True
         return super(VersionedQuery, self).get_compiler(*args, **kwargs)
+
+    def build_filter(self, filter_expr, **kwargs):
+        """
+        When a query is filtered with an expression like .filter(team=some_team_object),
+        where team is a VersionedForeignKey field, and some_team_object is a Versionable object,
+        adapt the filter value to be (team__identity=some_team_object.identity).
+
+        When the query is built, this will enforce that the tables are joined and that
+        the identity column and the as_of restriction is used for matching.
+
+        For example, the generated SQL will be like:
+
+           SELECT ... FROM foo INNER JOIN team ON (
+                foo.team_id == team.identity
+                AND foo.version_start_date <= [as_of]
+                AND (foo.version_end_date > [as_of] OR foo.version_end_date IS NULL)) ...
+
+        This is not necessary, and won't be applied, if any of these are true:
+        - no as_of is in effect
+        - the current objects are being queried (e.g. foo.objects.current.filter(...))
+        - a terminal object is being used as the lookup value (e.g. .filter(team=the_deleted_team_version)
+        - the lookup value is not a Versionable (e.g. .filter(foo='bar') or .filter(team=non_versionable_team)
+
+        Note that this has the effect that Foo.objects.as_of(t1).filter(team=team_object_at_t3) will
+        return the Foo objects at t1, and that accessing their team field (e.g. foo.team) will return
+        the team object that was associated with them at t1, which may be a different object than
+        team_object_at_t3.
+
+        The goal is to make expressions like Foo.objects.as_of(tx).filter(team=some_team_object) work as
+        closely as possible to standard, non-versioned Django querysets like Foo.objects.filter(team=some_team_object).
+
+        :param filter_expr:
+        :param kwargs:
+        :return: tuple
+        """
+        lookup, value = filter_expr
+        if self.querytime.active and isinstance(value, Versionable) and not value.is_latest:
+            new_lookup = lookup + LOOKUP_SEP + Versionable.OBJECT_IDENTIFIER_FIELD
+            filter_expr = (new_lookup, value.identity)
+        return super(VersionedQuery, self).build_filter(filter_expr, **kwargs)
 
 
 class VersionedQuerySet(QuerySet):

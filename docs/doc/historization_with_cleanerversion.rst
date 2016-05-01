@@ -323,12 +323,10 @@ Let's create two disciplines and some sportsclubs practicing these disciplines::
     lca = SportsClub.objects.create(name='LCA', practice_periodicity='individual',
                                                 discipline=running)
 
+    t1 = datetime.utcnow().replace(tzinfo=utc)
+
 Reading objects from a M2O relationship
 ---------------------------------------
-
-Assume, timestamps have been created as follows::
-    timestamp = datetime.datetime.utcnow().replace(tzinfo=utc)
-
 Now, let's read some stuff previously loaded::
 
     sportsclubs = SportsClub.objects.as_of(t1)  # This returns all SportsClubs existing at time t1 [returned within a QuerySet]
@@ -350,6 +348,84 @@ Note that select_related only works for models containing foreign keys.  It does
 This is not a CleanerVersion limitation; it's just the way that Django's select_related() works.  Use
 prefetch_related() instead if you want to prefetch reverse or many-to-many relationships.  Note that
 prefetch_related() will use at least two queries to prefetch the related objects.
+
+Filtering using objects
+^^^^^^^^^^^^^^^^^^^^^^^
+Following on the above example, let's create a new version of the running Discipline.  First, though, let's take
+a look at the id, identities and foreign keys as they are now::
+
+    >> (running.id, running.identity)
+    (1, 1)
+    >> (stb.discipline_id, stb.id, stb.identity)
+    (1, 10, 10)
+    >> (lca.discipline_id, lca.id, lca.identity)
+    (1, 20, 20)
+
+OK, so now we create a new version::
+
+    running = running.clone()
+    running.rules = "Don't run on other's feet"
+    running.save()
+
+    # Fetch the old version from the database:
+    running_at_t1 = Discipline.objects.as_of(t1).get(name='Running')
+
+How do the id, identities, and foreign keys look at this point?
+::
+
+    >> (running.id, running.identity)
+    (1, 1)
+
+    >> (running_at_t1.id, running_at_t1.identity)
+    (2, 1)
+
+    >> (stb.discipline_id, stb.id, stb.identity)
+    (1, 10, 10)
+
+    >> (lca.discipline_id, lca.id, lca.identity)
+    (1, 20, 20)
+
+The objects ``running`` and ``running_at_t1`` have different ids, but the same identity; they are different
+versions of the same object.  The id of the old version has changed; the new version has the original id value.
+
+Notice that ``stb`` and ``lca`` still refer to Discipline with id ``1``. When they were created, at t1, they were
+actually pointing to a different version than the current version.  Their discipline_id column was not updated to
+point to the old version when ``running`` was cloned.  This is an important implementation detail - foreign
+keys point to the latest version of the foreign object, which always has it's id equal to it's identity.  If this
+was not the case, it would be necessary to clone all of the objects that have a foreign key pointing to object X when
+object X is cloned; this would result in a very quickly growing database.
+
+When searching for an object at a given time t1, foreign key values are matched against the related records identity
+column, and the related record are further restricted to those records that are valid at t1.
+
+All of this should help you understand that when you filter a query for a certain point in time using an object,
+it's actually the identity of the object that will be used for the filtering, and not the id.  You are effectively
+saying, "I want to limit to records that were associated *with some version of* this object".
+::
+
+    >> stb1 = SportsClub.objects.as_of(t1).filter(discipline=running, name='STB').first()
+    >> stb2 = SportsClub.objects.as_of(t1).filter(discipline=running_at_t1, name='STB').first()
+    >> (stb1.discipline.id, stb2.discipline.id)
+    (2, 2)
+
+    >> stb3 = SportsClub.objects.current.filter(discipline=running, name='STB').first()
+    >> stb4 = SportsClub.objects.current.filter(discipline=running_at_t1, name='STB').first()
+    >> (stb3.discipline.id, stb4.discipline.id)
+    (1, 1)
+
+
+If you really want to filter using the id of the object, you need to explicitly use the id instead of
+passing the object itself::
+
+    >> stb5 = SportsClub.objects.as_of(t1).filter(discipline_id=running.id, name='STB').first()
+    >> stb6 = SportsClub.objects.as_of(t1).filter(discipline_id=running_at_t1.id, name='STB').first()
+    >> (stb5.discipline.id, stb6 is None)
+    (True, 2)
+
+    >> stb7 = SportsClub.objects.current.filter(discipline_id=running.id, name='STB').first()
+    >> stb8 = SportsClub.objects.current.filter(discipline_id=running_at_t1.id, name='STB').first()
+    >> (stb7.discipline.id, stb8 is None)
+    (1, True)
 
 Many-to-Many relationships
 ==========================
@@ -406,7 +482,7 @@ the current state, or the state at a specific point in time::
     local_members = club.members.filter(phone__startswith='555').all()
 
     # Working with a specific point in time:
-    november1 = datetime.datetime(2014, 11, 1).replace(tzinfo=pytz.utc)
+    november1 = datetime(2014, 11, 1).replace(tzinfo=utc)
     club = Club.objects.as_of(november1).get(name='Sweatshop')
     # The related objects that are retrieved were existing and related as of november1, too.
     local_members = club.members.filter(phone__startswith='555').all()
