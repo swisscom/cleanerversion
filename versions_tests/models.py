@@ -2,7 +2,8 @@ from django.db.models import CharField, IntegerField, Model, ForeignKey
 from django.db.models.deletion import DO_NOTHING, PROTECT, SET, SET_NULL
 from django.utils.encoding import python_2_unicode_compatible
 
-from versions.models import Versionable, VersionedManyToManyField, VersionedForeignKey
+from versions.models import Versionable
+from versions.fields import VersionedManyToManyField, VersionedForeignKey
 
 
 def versionable_description(obj):

@@ -106,7 +106,7 @@ class IsCurrentFilter(admin.SimpleListFilter):
 
 
 class VersionedAdminChecks(ModelAdminChecks):
-    def _check_exclude(self, cls, model):
+    def _check_exclude(self, cls, model=None):
         """
         Required to suppress error about exclude not being a tuple since we are using @property to dynamically change it
         """

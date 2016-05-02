@@ -68,7 +68,7 @@ class VersionedCollector(Collector):
                         # In the case of a SET.. method, clone before changing the value (if it hasn't already been
                         # cloned)
                         updated_instances = set()
-                        if not(isinstance(field, versions.models.VersionedForeignKey) and field.rel.on_delete == CASCADE):
+                        if not(isinstance(field, versions.fields.VersionedForeignKey) and field.rel.on_delete == CASCADE):
                             for instance in instances:
                                 # Clone before updating
                                 cloned = id_map.get(instance.pk, None)
