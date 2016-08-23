@@ -347,7 +347,9 @@ Note that select_related only works for models containing foreign keys.  It does
 
 This is not a CleanerVersion limitation; it's just the way that Django's select_related() works.  Use
 prefetch_related() instead if you want to prefetch reverse or many-to-many relationships.  Note that
-prefetch_related() will use at least two queries to prefetch the related objects.
+prefetch_related() will use at least two queries to prefetch the related objects.  See also
+the :ref:`prefetch_related_notes`.
+
 
 Filtering using objects
 ^^^^^^^^^^^^^^^^^^^^^^^
@@ -531,6 +533,42 @@ The syntax for soft-deleting is the same as the standard Django Model deletion s
     club.members.remove(person2, person3)
     club.members.remove(person4.id)
     club.members = []
+
+.. _prefetch_related_notes:
+
+Notes about using prefetch_related
+----------------------------------
+`prefetch_related <https://docs.djangoproject.com/en/1.8/ref/models/querysets/#prefetch-related>`_ accepts
+simple sting lookups or `Prefetch <https://docs.djangoproject.com/en/1.8/ref/models/querysets/#django.db.models.Prefetch>`_
+objects.
+
+When using ``prefetch_related`` with CleanerVersion, be aware that when using a ``Prefetch`` object **that
+specifies a queryset**, that you need to explicitly specify the ``as_of`` value, or use ``current``.
+A ``Prefetch`` queryset will not be automatically time-restricted based on the base queryset.
+
+For example, assuming you want everything at the time ``end_of_last_month``, do this::
+
+    disciplines_prefetch = Prefetch(
+        'sportsclubs__discipline_set',
+        queryset=Discipline.objects.as_of(end_of_last_month).filter('name__startswith'='B'))
+    people_last_month = Person.objects.as_of(end_of_last_month).prefetch_related(disciplines_prefetch)
+
+On the other hand, the following ``Prefetch``, without an ``as_of`` in the queryset, would result in all
+matching ``Discipline`` objects being returned, regardless whether they existed at ``end_of_last_month``
+or not::
+
+    # Don't do this, the Prefetch queryset is missing an as_of():
+    disciplines_prefetch = Prefetch(
+        'sportsclubs__discipline_set',
+        queryset=Discipline.objects.filter('name__startswith'='B'))
+    people_last_month = Person.objects.as_of(end_of_last_month).prefetch_related(disciplines_prefetch)
+
+If a ``Prefetch`` without an explicit queryset is used, or a simple string lookup, the generated queryset will
+be appropriately time-restricted.  The following statements will propagate the base queries'
+``as_of`` value to the generated related-objects queryset::
+
+    people1 = Person.objects.as_of(end_of_last_month).prefetch_related(Prefetch('sportsclubs__discipline_set'))
+    people2 = Person.objects.as_of(end_of_last_month).prefetch_related('sportsclubs__discipline_set')
 
 Navigating between different versions of an object
 ==================================================
