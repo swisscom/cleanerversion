@@ -22,7 +22,7 @@ import uuid
 from django import get_version
 from django.core.exceptions import SuspiciousOperation, ObjectDoesNotExist, ValidationError
 from django.db import connection, IntegrityError, transaction
-from django.db.models import Q, Count, Sum
+from django.db.models import Q, Count, Prefetch, Sum
 from django.db.models.deletion import ProtectedError
 from django.test import TestCase
 from django.utils.timezone import utc
@@ -1986,6 +1986,7 @@ class ReverseForeignKeyDirectAssignmentTests(TestCase):
         city = City.objects.as_of(self.t3).filter(identity=self.c10.identity).first()
         self.assertEqual(0, city.team_set.all().count())
 
+
 class PrefetchingTests(TestCase):
     def setUp(self):
         self.city1 = City.objects.create(name='Chicago')
@@ -2187,6 +2188,175 @@ class PrefetchingTests(TestCase):
                 old = len(award_players[i].awards.all())
                 new = len(updated_award_players[i].awards.all())
                 self.assertTrue(new == old - 1)
+
+
+class PrefetchingHistoricTests(TestCase):
+    def setUp(self):
+        self.c1 = City.objects.create(name='city.v1')
+        self.t1 = Team.objects.create(name='team1.v1', city=self.c1)
+        self.t2 = Team.objects.create(name='team2.v1', city=self.c1)
+        self.p1 = Player.objects.create(name='pl1.v1', team=self.t1)
+        self.p2 = Player.objects.create(name='pl2.v1', team=self.t1)
+        self.time1 = get_utc_now()
+        sleep(0.001)
+
+    def modify_objects(self):
+        # Clone the city (which is referenced by a foreign key in the team object).
+        self.c1a = self.c1.clone()
+        self.c1a.name = 'city.v2'
+        self.c1a.save()
+        self.t1a = self.t1.clone()
+        self.t1a.name = 'team1.v2'
+        self.t1a.save()
+        self.p1a = self.p1.clone()
+        self.p1a.name = 'pl1.v2'
+        self.p1a.save()
+
+    def test_reverse_fk_prefetch_queryset_with_historic_versions(self):
+        """
+        prefetch_related with Prefetch objects that specify querysets.
+        """
+        historic_cities_qs = City.objects.as_of(self.time1).filter(name='city.v1').prefetch_related(
+            Prefetch(
+                'team_set',
+                queryset=Team.objects.as_of(self.time1),
+                to_attr='prefetched_teams'
+            ),
+            Prefetch(
+                'prefetched_teams__player_set',
+                queryset=Player.objects.as_of(self.time1),
+                to_attr='prefetched_players'
+            )
+        )
+        with self.assertNumQueries(3):
+            historic_cities = list(historic_cities_qs)
+            self.assertEquals(1, len(historic_cities))
+            historic_city = historic_cities[0]
+            self.assertEquals(2, len(historic_city.prefetched_teams))
+            self.assertSetEqual({'team1.v1', 'team2.v1'}, {t.name for t in historic_city.prefetched_teams})
+            team = [t for t in historic_city.prefetched_teams if t.name == 'team1.v1'][0]
+            self.assertSetEqual({'pl1.v1', 'pl2.v1'}, {p.name for p in team.prefetched_players})
+
+        # For the 'current' case:
+        current_cities_qs = City.objects.current.filter(name='city.v1').prefetch_related(
+            Prefetch(
+                'team_set',
+                queryset=Team.objects.current,
+                to_attr='prefetched_teams'
+            ),
+            Prefetch(
+                'prefetched_teams__player_set',
+                queryset=Player.objects.current,
+                to_attr='prefetched_players'
+            )
+        )
+        with self.assertNumQueries(3):
+            current_cities = list(current_cities_qs)
+            self.assertEquals(1, len(current_cities))
+            current_city = current_cities[0]
+            self.assertEquals(2, len(current_city.prefetched_teams))
+            self.assertSetEqual({'team1.v1', 'team2.v1'}, {t.name for t in current_city.prefetched_teams})
+            team = [t for t in current_city.prefetched_teams if t.name == 'team1.v1'][0]
+            self.assertSetEqual({'pl1.v1', 'pl2.v1'}, {p.name for p in team.prefetched_players})
+
+        self.modify_objects()
+
+        historic_cities_qs = City.objects.as_of(self.time1).filter(name='city.v1').prefetch_related(
+            Prefetch(
+                'team_set',
+                queryset=Team.objects.as_of(self.time1),
+                to_attr='prefetched_teams'
+            ),
+            Prefetch(
+                'prefetched_teams__player_set',
+                queryset=Player.objects.as_of(self.time1),
+                to_attr='prefetched_players'
+            )
+        )
+        with self.assertNumQueries(3):
+            historic_cities = list(historic_cities_qs)
+            self.assertEquals(1, len(historic_cities))
+            historic_city = historic_cities[0]
+            self.assertEquals(2, len(historic_city.prefetched_teams))
+            self.assertSetEqual({'team1.v1', 'team2.v1'}, {t.name for t in historic_city.prefetched_teams})
+            team = [t for t in historic_city.prefetched_teams if t.name == 'team1.v1'][0]
+            self.assertSetEqual({'pl1.v1', 'pl2.v1'}, {p.name for p in team.prefetched_players})
+
+        # For the 'current' case:
+        current_cities_qs = City.objects.current.filter(name='city.v2').prefetch_related(
+            Prefetch(
+                'team_set',
+                queryset=Team.objects.current,
+                to_attr='prefetched_teams'
+            ),
+            Prefetch(
+                'prefetched_teams__player_set',
+                queryset=Player.objects.current,
+                to_attr='prefetched_players'
+            ),
+        )
+        with self.assertNumQueries(3):
+            current_cities = list(current_cities_qs)
+            self.assertEquals(1, len(current_cities))
+            current_city = current_cities[0]
+            self.assertEquals(2, len(current_city.prefetched_teams))
+            self.assertSetEqual({'team1.v2', 'team2.v1'}, {t.name for t in current_city.prefetched_teams})
+            team = [t for t in current_city.prefetched_teams if t.name == 'team1.v2'][0]
+            self.assertSetEqual({'pl1.v2', 'pl2.v1'}, {p.name for p in team.prefetched_players})
+
+    def test_reverse_fk_simple_prefetch_with_historic_versions(self):
+        """
+        prefetch_related with simple lookup.
+        """
+        historic_cities_qs = City.objects.as_of(self.time1).filter(name='city.v1').prefetch_related(
+            'team_set', 'team_set__player_set')
+        with self.assertNumQueries(3):
+            historic_cities = list(historic_cities_qs)
+            self.assertEquals(1, len(historic_cities))
+            historic_city = historic_cities[0]
+            self.assertEquals(2, len(historic_city.team_set.all()))
+            self.assertSetEqual({'team1.v1', 'team2.v1'}, {t.name for t in historic_city.team_set.all()})
+            team = [t for t in historic_city.team_set.all() if t.name == 'team1.v1'][0]
+            self.assertSetEqual({'pl1.v1', 'pl2.v1'}, {p.name for p in team.player_set.all()})
+
+        # For the 'current' case:
+        current_cities_qs = City.objects.current.filter(name='city.v1').prefetch_related(
+            'team_set', 'team_set__player_set')
+        with self.assertNumQueries(3):
+            current_cities = list(current_cities_qs)
+            self.assertEquals(1, len(current_cities))
+            current_city = current_cities[0]
+            self.assertEquals(2, len(current_city.team_set.all()))
+            self.assertSetEqual({'team1.v1', 'team2.v1'}, {t.name for t in current_city.team_set.all()})
+            team = [t for t in current_city.team_set.all() if t.name == 'team1.v1'][0]
+            self.assertSetEqual({'pl1.v1', 'pl2.v1'}, {p.name for p in team.player_set.all()})
+
+        # Now, we'll clone the city (which is referenced by a foreign key in the team object).
+        # The queries above, when repeated, should work the same as before.
+        self.modify_objects()
+
+        historic_cities_qs = City.objects.as_of(self.time1).filter(name='city.v1').prefetch_related(
+            'team_set', 'team_set__player_set')
+        with self.assertNumQueries(3):
+            historic_cities = list(historic_cities_qs)
+            self.assertEquals(1, len(historic_cities))
+            historic_city = historic_cities[0]
+            self.assertEquals(2, len(historic_city.team_set.all()))
+            self.assertSetEqual({'team1.v1', 'team2.v1'}, {t.name for t in historic_city.team_set.all()})
+            team = [t for t in historic_city.team_set.all() if t.name == 'team1.v1'][0]
+            self.assertSetEqual({'pl1.v1', 'pl2.v1'}, {p.name for p in team.player_set.all()})
+
+        # For the 'current' case:
+        current_cities_qs = City.objects.current.filter(name='city.v2').prefetch_related(
+            'team_set', 'team_set__player_set')
+        with self.assertNumQueries(3):
+            current_cities = list(current_cities_qs)
+            self.assertEquals(1, len(current_cities))
+            current_city = current_cities[0]
+            self.assertEquals(2, len(current_city.team_set.all()))
+            self.assertSetEqual({'team1.v2', 'team2.v1'}, {t.name for t in current_city.team_set.all()})
+            team = [t for t in current_city.team_set.all() if t.name == 'team1.v2'][0]
+            self.assertSetEqual({'pl1.v2', 'pl2.v1'}, {p.name for p in team.player_set.all()})
 
 
 class IntegrationNonVersionableModelsTests(TestCase):

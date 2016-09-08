@@ -890,6 +890,38 @@ class VersionedForeignRelatedObjectsDescriptor(ForeignRelatedObjectsDescriptor):
                     queryset = queryset.as_of(self.instance._querytime.time)
                 return queryset
 
+            def get_prefetch_queryset(self, instances, queryset=None):
+                """
+                Overrides RelatedManager's implementation of get_prefetch_queryset so that it works
+                nicely with VersionedQuerySets.  It ensures that identities and time-limited where
+                clauses are used when selecting related reverse foreign key objects.
+                """
+                if queryset is None:
+                    # Note that this intentionally call's VersionManager's get_queryset, instead of simply calling
+                    # the superclasses' get_queryset (as the non-versioned RelatedManager does), because what is
+                    # needed is a simple Versioned queryset without any restrictions (e.g. do not
+                    # apply self.core_filters).
+                    queryset = VersionManager.get_queryset(self)
+
+                queryset._add_hints(instance=instances[0])
+                queryset = queryset.using(queryset._db or self._db)
+
+                rel_obj_attr = rel_field.get_local_related_value
+                instance_attr = rel_field.get_foreign_related_value
+                # Use identities instead of ids so that this will work with versioned objects.
+                instances_dict = {(inst.identity,): inst for inst in instances}
+                identities = [inst.identity for inst in instances]
+                query = {'%s__identity__in' % rel_field.name: identities}
+                queryset = queryset.filter(**query)
+
+                # Since we just bypassed this class' get_queryset(), we must manage
+                # the reverse relation manually.
+                for rel_obj in queryset:
+                    instance = instances_dict[rel_obj_attr(rel_obj)]
+                    setattr(rel_obj, rel_field.name, instance)
+                cache_name = rel_field.related_query_name()
+                return queryset, rel_obj_attr, instance_attr, False, cache_name
+
             def add(self, *objs):
                 cloned_objs = ()
                 for obj in objs:
