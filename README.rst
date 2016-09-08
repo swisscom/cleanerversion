@@ -11,6 +11,15 @@ CleanerVersion for Django
 .. image:: https://img.shields.io/pypi/dw/CleanerVersion.svg
    :target: https://pypi.python.org/pypi/CleanerVersion
 
+Django 1.6 and 1.7 version notice
+=================================
+This branch is for the obsolete Django 1.6 and 1.7 versions.  Please use the master branch for working with
+later Django versions.
+
+It is not planned to support CleanerVersion for obsoleted Django versions; no new features / bugfixes will
+be backported.
+
+
 Abstract
 ========
 
