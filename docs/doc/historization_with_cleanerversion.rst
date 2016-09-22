@@ -745,7 +745,7 @@ will need to be ready to handle that.
 Postgresql specific
 ===================
 
-Django creates `extra indexes <https://docs.djangoproject.com/en/1.7/ref/databases/#indexes-for-varchar-and-text-columns>`_
+Django creates `extra indexes <https://docs.djangoproject.com/en/1.8/ref/databases/#indexes-for-varchar-and-text-columns>`_
 for CharFields that are used for like queries (e.g. WHERE foo like 'fish%'). Since Django 1.6 (the version CleanerVersion originally
 targeted) did not have native database UUID fields, the UUID fields that are used for the id and identity columns of Versionable models
 have these extra indexes created.  In fact, these fields will never be compared using the like operator.  Leaving these indexes would create a
@@ -778,9 +778,6 @@ at the same time, see:
 
 Note that this example is for Django >= 1.7; it makes use of the
 `application registry <https://docs.djangoproject.com/en/stable/ref/applications/>`_ that was introduced in Django 1.7.
-
-For Django 1.6, it is possible to do something similar.  The functions in ``versions.util.postgresql`` should be able to be used
-unchanged for Django 1.6.
 
 
 Integrating CleanerVersion versioned models with non-versioned models
