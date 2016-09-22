@@ -37,7 +37,7 @@ setup(name='CleanerVersion',
       install_requires=['django'],
       package_data={'versions': ['static/js/*.js','templates/versions/*.html']},
       classifiers=[
-          'Development Status :: 4 - Beta',
+          'Development Status :: 5 - Production/Stable',
           'Framework :: Django',
           'Intended Audience :: Developers',
           'Programming Language :: Python :: 2.7',
