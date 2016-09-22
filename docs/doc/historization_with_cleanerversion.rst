@@ -3,7 +3,7 @@ Historization with CleanerVersion
 *********************************
 
 Disclaimer: This documentation as well as the CleanerVersion application code have been written to work against Django
-1.6.x, 1.7.x and 1.8.x. The documentation may not be accurate anymore when using more recent versions of Django.
+1.8.x. The documentation may not be accurate anymore when using more recent versions of Django.
 
 .. _cleanerversion-quick-starter:
 
@@ -746,9 +746,9 @@ Postgresql specific
 ===================
 
 Django creates `extra indexes <https://docs.djangoproject.com/en/1.7/ref/databases/#indexes-for-varchar-and-text-columns>`_
-for CharFields that are used for like queries (e.g. WHERE foo like 'fish%'). Since Django 1.6 and 1.7 do not support
-native database UUID fields, the UUID fields that are used for the id and identity columns of Versionable models have these extra
-indexes created.  In fact, these fields will never be compared using the like operator.  Leaving these indexes would create a
+for CharFields that are used for like queries (e.g. WHERE foo like 'fish%'). Since Django 1.6 (the version CleanerVersion originally
+targeted) did not have native database UUID fields, the UUID fields that are used for the id and identity columns of Versionable models
+have these extra indexes created.  In fact, these fields will never be compared using the like operator.  Leaving these indexes would create a
 performance penalty for inserts and updates, especially for larger tables.  ``versions.util.postgresql`` has a function
 ``remove_uuid_id_like_indexes`` that can be used to remove these extra indexes.
 

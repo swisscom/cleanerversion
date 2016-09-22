@@ -2580,6 +2580,9 @@ class VersionRestoreTest(TestCase):
         self.assertSetEqual(set(previous.awards.all()), set(self.awards.values()))
         self.assertEqual(self.forty_niners, previous.team)
 
+        # There should be no overlap of version periods.
+        self.assertEquals(previous.version_end_date, restored.version_start_date)
+
     def test_restore_with_required_foreignkey(self):
         team = Team.objects.create(name="Flying Pigs")
         mascot_v1 = Mascot.objects.create(name="Curly", team=team)
