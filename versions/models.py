@@ -16,16 +16,15 @@ import copy
 import datetime
 import uuid
 from collections import namedtuple
-from django import VERSION
+import re
 
-if VERSION[:2] >= (1, 8):
-    from django.db.models.sql.datastructures import Join
-if VERSION[:2] >= (1, 7):
-    from django.apps.registry import apps
+from django.db.models.sql.datastructures import Join
+from django.apps.registry import apps
 from django.core.exceptions import SuspiciousOperation, ObjectDoesNotExist
-from django.db import transaction
+from django.db import models, router, transaction
 from django.db.models.base import Model
 from django.db.models import Q
+from django.db.models.constants import LOOKUP_SEP
 from django.db.models.fields import FieldDoesNotExist
 from django.db.models.fields.related import (ForeignKey, ReverseSingleRelatedObjectDescriptor,
                                              ReverseManyRelatedObjectsDescriptor, ManyToManyField,
@@ -38,8 +37,6 @@ from django.db.models.sql.where import ExtraWhere, WhereNode
 from django.utils.functional import cached_property
 from django.utils.timezone import utc
 from django.utils import six
-
-from django.db import models, router
 
 from versions.settings import get_versioned_delete_collector_class
 from versions.settings import settings as versions_settings
@@ -271,40 +268,22 @@ class VersionManager(models.Manager):
 class VersionedWhereNode(WhereNode):
     def as_sql(self, qn, connection):
         """
-        :param qn: In Django 1.7 & 1.8 this is a compiler; in 1.6, it's an instance-method
+        This method identifies joined table aliases in order for VersionedExtraWhere.as_sql()
+        to be able to add time restrictions for those tables based on the VersionedQuery's
+        querytime value.
+
+        :param qn: In Django 1.7 & 1.8 this is a compiler
         :param connection: A DB connection
         :return: A tuple consisting of (sql_string, result_params)
         """
         # self.children is an array of VersionedExtraWhere-objects
         for child in self.children:
             if isinstance(child, VersionedExtraWhere) and not child.params:
-                try:
-                    # Django 1.7 & 1.8 handles compilers as objects
-                    _query = qn.query
-                except AttributeError:
-                    # Django 1.6 handles compilers as instancemethods
-                    _query = qn.__self__.query
+                _query = qn.query
                 query_time = _query.querytime.time
                 apply_query_time = _query.querytime.active
-                # In Django 1.6 & 1.7, use the join_map to know, what *table* gets joined to which
-                # *left-hand sided* table
-                # In Django 1.8, use the Join objects in alias_map
-                if hasattr(_query, 'join_map'):
-                    for lhs, table, join_cols in _query.join_map:
-                        if (lhs == child.alias and table == child.related_alias) \
-                                or (lhs == child.related_alias and table == child.alias):
-                            child.set_joined_alias(table)
-                            break
-                else:
-                    for table in _query.alias_map:
-                        join = _query.alias_map[table]
-                        if not isinstance(join, Join):
-                            continue
-                        lhs = join.parent_alias
-                        if (lhs == child.alias and table == child.related_alias) \
-                                or (lhs == child.related_alias and table == child.alias):
-                            child.set_joined_alias(table)
-                            break
+                alias_map = _query.alias_map
+                self._set_child_joined_alias(child, alias_map)
                 if apply_query_time:
                     # Add query parameters that have not been added till now
                     child.set_as_of(query_time)
@@ -312,6 +291,23 @@ class VersionedWhereNode(WhereNode):
                     # Remove the restriction if it's not required
                     child.sqls = []
         return super(VersionedWhereNode, self).as_sql(qn, connection)
+
+    @staticmethod
+    def _set_child_joined_alias(child, alias_map):
+        """
+        Set the joined alias on the child, for Django >= 1.8.0
+        :param child:
+        :param alias_map:
+        """
+        for table in alias_map:
+            join = alias_map[table]
+            if not isinstance(join, Join):
+                continue
+            lhs = join.parent_alias
+            if (lhs == child.alias and table == child.related_alias) \
+                    or (lhs == child.related_alias and table == child.alias):
+                child.set_joined_alias(table)
+                break
 
 
 class VersionedExtraWhere(ExtraWhere):
@@ -350,6 +346,10 @@ class VersionedExtraWhere(ExtraWhere):
         sql = ""
         params = []
 
+        # Fail fast for inacceptable cases
+        if self._as_of_time_set and not self._joined_alias:
+            raise ValueError("joined_alias is not set, but as_of is; this is a conflict!")
+
         # Set the SQL string in dependency of whether as_of_time was set or not
         if self._as_of_time_set:
             if self.as_of_time:
@@ -366,8 +366,6 @@ class VersionedExtraWhere(ExtraWhere):
         # By here, the sql string is defined if an as_of_time was provided
         if self._joined_alias:
             sql = sql.format(alias=self._joined_alias)
-        else:
-            raise ValueError("joined_alias not set")
 
         # Set the final sqls
         # self.sqls needs to be set before the call to parent
@@ -421,6 +419,46 @@ class VersionedQuery(Query):
             # just not very comfortable to read)
             self._querytime_filter_added = True
         return super(VersionedQuery, self).get_compiler(*args, **kwargs)
+
+    def build_filter(self, filter_expr, **kwargs):
+        """
+        When a query is filtered with an expression like .filter(team=some_team_object),
+        where team is a VersionedForeignKey field, and some_team_object is a Versionable object,
+        adapt the filter value to be (team__identity=some_team_object.identity).
+
+        When the query is built, this will enforce that the tables are joined and that
+        the identity column and the as_of restriction is used for matching.
+
+        For example, the generated SQL will be like:
+
+           SELECT ... FROM foo INNER JOIN team ON (
+                foo.team_id == team.identity
+                AND foo.version_start_date <= [as_of]
+                AND (foo.version_end_date > [as_of] OR foo.version_end_date IS NULL)) ...
+
+        This is not necessary, and won't be applied, if any of these are true:
+        - no as_of is in effect
+        - the current objects are being queried (e.g. foo.objects.current.filter(...))
+        - a terminal object is being used as the lookup value (e.g. .filter(team=the_deleted_team_version)
+        - the lookup value is not a Versionable (e.g. .filter(foo='bar') or .filter(team=non_versionable_team)
+
+        Note that this has the effect that Foo.objects.as_of(t1).filter(team=team_object_at_t3) will
+        return the Foo objects at t1, and that accessing their team field (e.g. foo.team) will return
+        the team object that was associated with them at t1, which may be a different object than
+        team_object_at_t3.
+
+        The goal is to make expressions like Foo.objects.as_of(tx).filter(team=some_team_object) work as
+        closely as possible to standard, non-versioned Django querysets like Foo.objects.filter(team=some_team_object).
+
+        :param filter_expr:
+        :param kwargs:
+        :return: tuple
+        """
+        lookup, value = filter_expr
+        if self.querytime.active and isinstance(value, Versionable) and not value.is_latest:
+            new_lookup = lookup + LOOKUP_SEP + Versionable.OBJECT_IDENTIFIER_FIELD
+            filter_expr = (new_lookup, value.identity)
+        return super(VersionedQuery, self).build_filter(filter_expr, **kwargs)
 
 
 class VersionedQuerySet(QuerySet):
@@ -487,23 +525,6 @@ class VersionedQuerySet(QuerySet):
         :param kwargs: Same as the original QuerySet._clone params
         :return: Just as QuerySet._clone, this method returns a clone of the original object
         """
-        if VERSION[:2] == (1, 6):
-            klass = kwargs.pop('klass', None)
-            # This patch was taken from Django 1.7 and is applied only in case we're using Django 1.6 and
-            # ValuesListQuerySet objects. Since VersionedQuerySet is not a subclass of ValuesListQuerySet, a new type
-            # inheriting from both is created and used as class.
-            # https://github.com/django/django/blob/1.7/django/db/models/query.py#L943
-            if klass and not issubclass(self.__class__, klass):
-                base_queryset_class = getattr(self, '_base_queryset_class', self.__class__)
-                class_bases = (klass, base_queryset_class)
-                class_dict = {
-                    '_base_queryset_class': base_queryset_class,
-                    '_specialized_queryset_class': klass,
-                }
-                kwargs['klass'] = type(klass.__name__, class_bases, class_dict)
-            else:
-                kwargs['klass'] = klass
-
         clone = super(VersionedQuerySet, self)._clone(**kwargs)
         clone.querytime = self.querytime
         return clone
@@ -701,7 +722,7 @@ class VersionedManyToManyField(ManyToManyField):
         # declared apps' models inside a __fake__ module.
         # This means that the models can be already loaded and registered by their original module, when we
         # reach this point of the application and therefore there is no need to load them a second time.
-        if VERSION[:2] >= (1, 7) and cls.__module__ == '__fake__':
+        if cls.__module__ == '__fake__':
             try:
                 # Check the apps for an already registered model
                 return apps.get_registered_model(cls._meta.app_label, str(name))
@@ -768,6 +789,7 @@ class VersionedReverseSingleRelatedObjectDescriptor(ReverseSingleRelatedObjectDe
 class VersionedForeignRelatedObjectsDescriptor(ForeignRelatedObjectsDescriptor):
     """
     This descriptor generates the manager class that is used on the related object of a ForeignKey relation
+    (i.e. the reverse-ForeignKey field manager).
     """
 
     @cached_property
@@ -801,6 +823,21 @@ class VersionedForeignRelatedObjectsDescriptor(ForeignRelatedObjectsDescriptor):
                         raise TypeError("Trying to add a non-Versionable to a VersionedForeignKey relationship")
                     cloned_objs += (obj.clone(),)
                 super(VersionedRelatedManager, self).add(*cloned_objs)
+
+            # clear() and remove() are present if the FK is nullable
+            if 'clear' in dir(manager_cls):
+                def clear(self, **kwargs):
+                    """
+                    Overridden to ensure that the current queryset is used, and to clone objects before they
+                    are removed, so that history is not lost.
+                    """
+                    bulk = kwargs.pop('bulk', True)
+                    db = router.db_for_write(self.model, instance=self.instance)
+                    queryset = self.current.using(db)
+                    with transaction.atomic(using=db, savepoint=False):
+                        cloned_pks = [obj.clone().pk for obj in queryset]
+                        update_qs = self.current.filter(pk__in=cloned_pks)
+                        self._clear(update_qs, bulk)
 
             if 'remove' in dir(manager_cls):
                 def remove(self, *objs):
@@ -841,10 +878,7 @@ def create_versioned_many_related_manager(superclass, rel):
                 version_start_date_field = self.through._meta.get_field('version_start_date')
                 version_end_date_field = self.through._meta.get_field('version_end_date')
             except FieldDoesNotExist as e:
-                if VERSION[:2] >= (1, 8):
-                    fields = [f.name for f in self.through._meta.get_fields()]
-                else:
-                    fields = self.through._meta.get_all_field_names()
+                fields = [f.name for f in self.through._meta.get_fields()]
                 print(str(e) + "; available fields are " + ", ".join(fields))
                 raise e
                 # FIXME: this probably does not work when auto-referencing
@@ -879,12 +913,8 @@ def create_versioned_many_related_manager(superclass, rel):
                 old_ids = set()
                 for obj in objs:
                     if isinstance(obj, self.model):
-                        # The Django 1.7-way is preferred
                         if hasattr(self, 'target_field'):
                             fk_val = self.target_field.get_foreign_related_value(obj)[0]
-                        # But the Django 1.6.x -way is supported for backward compatibility
-                        elif hasattr(self, '_get_fk_val'):
-                            fk_val = self._get_fk_val(obj, target_field_name)
                         else:
                             raise TypeError("We couldn't find the value of the foreign key, this might be due to the "
                                             "use of an unsupported version of Django")
@@ -1027,13 +1057,7 @@ class VersionedReverseManyRelatedObjectsDescriptor(ReverseManyRelatedObjectsDesc
 
         filter = Q(**{relation_manager.source_field.attname: instance.pk})
         qs = self.through.objects.current.filter(filter)
-        try:
-            # Django 1.7
-            target_name = relation_manager.target_field.attname
-        except AttributeError:
-            # Django 1.6
-            target_name = relation_manager.through._meta.get_field_by_name(
-                relation_manager.target_field_name)[0].attname
+        target_name = relation_manager.target_field.attname
         current_ids = set(qs.values_list(target_name, flat=True))
 
         being_removed = current_ids - new_ids
@@ -1380,6 +1404,7 @@ class Versionable(models.Model):
             latest = cls.objects.current_version(self, check_db=True)
             if latest and latest != self:
                 latest.delete()
+                restored.version_start_date = latest.version_end_date
 
             self.save()
             restored.save()

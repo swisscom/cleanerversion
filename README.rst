@@ -20,7 +20,6 @@ relational database. It allows to keep track of modifications on an object over 
 
 CleanerVersion therefore enables a Django-based Datawarehouse, which was the initial idea of this package.
 
-
 Features
 ========
 
@@ -50,8 +49,16 @@ Prerequisites
 This code was tested with the following technical components
 
 * Python 2.7 & 3.4
-* Django 1.6, 1.7 & 1.8
+* Django 1.8
 * PostgreSQL 9.3.4 & SQLite3
+
+Older Django versions
+=====================
+CleanerVersion was originally written for Django 1.6.
+
+Old packages compatible with older Django releases:
+
+* Django 1.6 and 1.7: https://pypi.python.org/pypi/CleanerVersion/1.5.4
 
 
 Documentation

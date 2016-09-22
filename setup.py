@@ -21,7 +21,7 @@ If you get errors, check the following things:
 """
 
 setup(name='CleanerVersion',
-      version='1.5.2',
+      version='1.5.4',
       description='A versioning solution for relational data models using the Django ORM',
       long_description='CleanerVersion is a solution that allows you to read and write multiple versions of an entry '
                        'to and from your relational database. It allows to keep track of modifications on an object '
@@ -37,7 +37,7 @@ setup(name='CleanerVersion',
       install_requires=['django'],
       package_data={'versions': ['static/js/*.js','templates/versions/*.html']},
       classifiers=[
-          'Development Status :: 4 - Beta',
+          'Development Status :: 5 - Production/Stable',
           'Framework :: Django',
           'Intended Audience :: Developers',
           'Programming Language :: Python :: 2.7',

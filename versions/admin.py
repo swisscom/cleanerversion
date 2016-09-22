@@ -12,8 +12,7 @@ from django.contrib.admin.options import get_content_type_for_model
 from django.utils.encoding import force_text
 from django.utils.text import capfirst
 from django.template.response import TemplateResponse
-from django import VERSION
-
+from datetime import datetime
 
 class DateTimeFilterForm(forms.Form):
     def __init__(self, request, *args, **kwargs):
@@ -52,6 +51,7 @@ class DateTimeFilter(admin.FieldListFilter):
     title = 'DateTime filter'
 
     def __init__(self, field, request, params, model, model_admin, field_path):
+        self.field_path = field_path
         self.lookup_kwarg_as_ofdate = '%s_as_of_0' % field_path
         self.lookup_kwarg_as_oftime = '%s_as_of_1' % field_path
         super(DateTimeFilter, self).__init__(field, request, params, model, model_admin, field_path)
@@ -67,8 +67,9 @@ class DateTimeFilter(admin.FieldListFilter):
         return DateTimeFilterForm(request, data=self.used_parameters, field_name=self.field_path)
 
     def queryset(self, request, queryset):
-        if self.form.is_valid() and self.form.cleaned_data.values()[0] is not None:
-            filter_params = self.form.cleaned_data.values()[0]
+        fieldname = '%s_as_of' % self.field_path
+        if self.form.is_valid() and fieldname in self.form.cleaned_data:
+            filter_params = self.form.cleaned_data.get(fieldname, datetime.utcnow())
             return queryset.as_of(filter_params)
         else:
             return queryset
@@ -133,7 +134,7 @@ class VersionedAdmin(admin.ModelAdmin):
         This is required a subclass of VersionedAdmin has readonly_fields ours won't be undone
         """
         if obj:
-            return self.readonly_fields + ('id', 'identity', 'is_current',)
+            return list(self.readonly_fields) + ['id', 'identity', 'is_current']
         return self.readonly_fields
 
     def get_ordering(self, request):
@@ -164,21 +165,34 @@ class VersionedAdmin(admin.ModelAdmin):
         Adds versionable custom filtering ability to changelist
         """
         list_filter = super(VersionedAdmin, self).get_list_filter(request)
-        return list_filter + (('version_start_date', DateTimeFilter), IsCurrentFilter)
+        return list(list_filter) + [('version_start_date', DateTimeFilter), IsCurrentFilter]
 
-    def restore(self, request, *args, **kwargs):
-        return True
+    def restore(self,request, *args, **kwargs):
+        """
+        View for restoring object from change view
+        """
+        paths = request.path_info.split('/')
+        object_id_index = paths.index("restore") - 1
+        object_id = paths[object_id_index]
+
+        obj = super(VersionedAdmin,self).get_object(request, object_id)
+        obj.restore()
+        admin_wordIndex = object_id_index - 3
+        path = "/%s" % ("/".join(paths[admin_wordIndex:object_id_index]))
+        return HttpResponseRedirect(path)
 
     def will_not_clone(self, request, *args, **kwargs):
         """
         Add save but not clone capability in the changeview
         """
         paths = request.path_info.split('/')
-
-        object_id = paths[3]
+        index_of_object_id = paths.index("will_not_clone")-1
+        object_id = paths[index_of_object_id]
         self.change_view(request, object_id)
+
+        admin_wordInUrl = index_of_object_id-3
         # This gets the adminsite for the app, and the model name and joins together with /
-        path = '/' + '/'.join(paths[1:3])
+        path = '/' + '/'.join(paths[admin_wordInUrl:index_of_object_id])
         return HttpResponseRedirect(path)
 
     @property
@@ -201,7 +215,8 @@ class VersionedAdmin(admin.ModelAdmin):
         """
         obj = super(VersionedAdmin, self).get_object(request, object_id)  # from_field breaks in 1.7.8
         # Only clone if update view as get_object() is also called for change, delete, and history views
-        if request.method == 'POST' and obj and obj.is_latest and 'will_not_clone' not in request.path and 'delete' not in request.path:
+        if request.method == 'POST' and obj and obj.is_latest and 'will_not_clone' not in request.path \
+                and 'delete' not in request.path and 'restore' not in request.path:
             obj = obj.clone()
 
         return obj
@@ -223,8 +238,7 @@ class VersionedAdmin(admin.ModelAdmin):
             content_type=get_content_type_for_model(model)
         ).select_related().order_by('action_time')
 
-        ctx = self.admin_site.each_context() if VERSION < (1, 8) \
-            else self.admin_site.each_context(request)
+        ctx = self.admin_site.each_context(request)
 
         context = dict(ctx,
                        title=('Change history: %s') % force_text(obj),
@@ -246,7 +260,8 @@ class VersionedAdmin(admin.ModelAdmin):
         Appends the custom will_not_clone url to the admin site
         """
         not_clone_url = [url(r'^(.+)/will_not_clone/$', admin.site.admin_view(self.will_not_clone))]
-        return not_clone_url + super(VersionedAdmin, self).get_urls()
+        restore_url = [url(r'^(.+)/restore/$', admin.site.admin_view(self.restore))]
+        return not_clone_url + restore_url + super(VersionedAdmin, self).get_urls()
 
     def is_current(self, obj):
         return obj.is_current

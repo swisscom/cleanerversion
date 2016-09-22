@@ -641,6 +641,53 @@ class OneToManyTest(TestCase):
         team_at_t2 = Team.objects.as_of(t2).first()
         self.assertEqual(2, team_at_t2.player_set.count())
 
+    def test_finding_object_with_historic_foreign_key(self):
+        t1 = get_utc_now()
+        sleep(0.01)
+        team = self.team.clone()
+        team.name = 't.v2'
+        team.save()
+        t2 = get_utc_now()
+        sleep(0.01)
+        team = team.clone()
+        team.name = 't.v3'
+        team.save()
+        team_at_t1 = Team.objects.as_of(t1).get(identity=team.identity)
+        team_at_t2 = Team.objects.as_of(t2).get(identity=team.identity)
+        team_current = Team.objects.current.get(identity=team.identity)
+
+        # self.p1's foreign key to self.team is it's original value, which is equal
+        # to team_at_t1's identity, but not (any longer) team_at_t1's id.
+
+        # The following queries should all work to return the self.p1 Player:
+
+        # Using a cross-relation lookup on a non-identity field (team__name):
+        player_p1_lookup = Player.objects.as_of(t1).get(team__name=team_at_t1.name, name='p1.v1')
+        self.assertEqual(self.p1, player_p1_lookup)
+
+        # Explicitly specifying the identity field in the lookup:
+        player_p1_explicit = Player.objects.as_of(t1).get(team__identity=team_at_t1.identity, name='p1.v1')
+        self.assertEqual(self.p1, player_p1_explicit)
+
+        # The following three all work because the foreign key actually refers to the identity
+        # field of the foreign object (which equals the identity of the current object).
+
+        # Providing the current related object to filter on:
+        player_p1_obj_current = Player.objects.as_of(t1).get(team=team_current, name='p1.v1')
+        self.assertEqual(self.p1, player_p1_obj_current)
+        self.assertEqual(team_at_t1, player_p1_obj_current.team)
+
+        # Providing the related object that existed at the as_of time:
+        player_p1_obj_as_of = Player.objects.as_of(t1).get(team=team_at_t1, name='p1.v1')
+        self.assertEqual(self.p1, player_p1_obj_as_of)
+        self.assertEqual(team_at_t1, player_p1_obj_as_of.team)
+
+        # Providing the related object that is neither current, nor the one that existed
+        # at the as_of time, but that has the same identity.
+        player_p1_obj_other_version = Player.objects.as_of(t1).get(team=team_at_t2, name='p1.v1')
+        self.assertEqual(self.p1, player_p1_obj_other_version)
+        self.assertEqual(team_at_t1, player_p1_obj_other_version.team)
+
     def test_creating_new_version_of_the_player(self):
         t1 = get_utc_now()
         sleep(0.1)
@@ -1382,11 +1429,11 @@ class MultiM2MTest(TestCase):
         self.assertEqual(1, Student.objects.filter(identity=annika.identity).count())
         # There are 4 links to 3 professors (Mr. Biggs has been cloned once when setting up, thus 1 additional link)
         student_professor_links = list(student_professors_mgr.through.objects.filter(
-            **{student_professors_mgr.source_field_name: annika_pre_clone}))
+            **{student_professors_mgr.source_field_name: annika_pre_clone.id}))
         self.assertEqual(4, len(student_professor_links))
         # There are 3 links to classrooms
         student_classroom_links = list(student_classrooms_mgr.through.objects.filter(
-            **{student_classrooms_mgr.source_field_name: annika_pre_clone}))
+            **{student_classrooms_mgr.source_field_name: annika_pre_clone.id}))
         self.assertEqual(3, len(student_classroom_links))
 
         # Do the CLONE that also impacts the number of linking entries
@@ -1400,25 +1447,25 @@ class MultiM2MTest(TestCase):
         # - 4 of them are pointing the previous annika-object (including the non-current link to Mr. Biggs)
         # - 3 of them are pointing the current annika-object (only current links were taken over)
         student_professor_links = list(student_professors_mgr.through.objects.filter(
-            Q(**{student_professors_mgr.source_field_name: annika_pre_clone}) |
-            Q(**{student_professors_mgr.source_field_name: annika_post_clone})))
+            Q(**{student_professors_mgr.source_field_name: annika_pre_clone.id}) |
+            Q(**{student_professors_mgr.source_field_name: annika_post_clone.id})))
         self.assertEqual(7, len(student_professor_links))
         self.assertEqual(4, student_professors_mgr.through.objects.filter(
-            Q(**{student_professors_mgr.source_field_name: annika_pre_clone})).count())
+            Q(**{student_professors_mgr.source_field_name: annika_pre_clone.id})).count())
         self.assertEqual(3, student_professors_mgr.through.objects.filter(
-            Q(**{student_professors_mgr.source_field_name: annika_post_clone})).count())
+            Q(**{student_professors_mgr.source_field_name: annika_post_clone.id})).count())
 
         # There are 6 links to 3 professors
         # - 3 of them are pointing the previous annika-object
         # - 3 of them are pointing the current annika-object
         student_classroom_links = list(student_classrooms_mgr.through.objects.filter(
-            Q(**{student_classrooms_mgr.source_field_name: annika_pre_clone}) |
-            Q(**{student_classrooms_mgr.source_field_name: annika_post_clone})))
+            Q(**{student_classrooms_mgr.source_field_name: annika_pre_clone.id}) |
+            Q(**{student_classrooms_mgr.source_field_name: annika_post_clone.id})))
         self.assertEqual(6, len(student_classroom_links))
         self.assertEqual(3, student_classrooms_mgr.through.objects.filter(
-            Q(**{student_classrooms_mgr.source_field_name: annika_pre_clone})).count())
+            Q(**{student_classrooms_mgr.source_field_name: annika_pre_clone.id})).count())
         self.assertEqual(3, student_classrooms_mgr.through.objects.filter(
-            Q(**{student_classrooms_mgr.source_field_name: annika_post_clone})).count())
+            Q(**{student_classrooms_mgr.source_field_name: annika_post_clone.id})).count())
 
 
 class MultiM2MToSameTest(TestCase):
@@ -1515,6 +1562,9 @@ class SelfReferencingManyToManyTest(TestCase):
         for person in [maude, max]:
             self.assertEqual('Mips', person.children.first().name)
 
+    def test_relationship_spanning_query(self):
+        mips_parents_qs = Person.objects.current.filter(children__name='Mips')
+        self.assertSetEqual({'Max', 'Maude'}, {p.name for p in mips_parents_qs})
 
 class ManyToManyFilteringTest(TestCase):
     def setUp(self):
@@ -1854,6 +1904,88 @@ class HistoricM2MOperationsTests(TestCase):
         self.big_brother.subjects.all().first()
 
 
+class M2MDirectAssignmentTests(TestCase):
+    def setUp(self):
+        self.o1 = Observer.objects.create(name="1.0")
+        self.s1 = Subject.objects.create(name="1.0")
+        self.s2 = Subject.objects.create(name="2.0")
+        self.t1 = get_utc_now()
+        self.o1 = self.o1.clone()
+        self.o1.name = "1.1"
+        self.o1.save()
+        self.o1.subjects.add(self.s1, self.s2)
+        self.t2 = get_utc_now()
+        self.o1 = self.o1.clone()
+        self.o1.name = "1.2"
+        self.o1.save()
+        self.o1.subjects = []
+        self.t3 = get_utc_now()
+
+    def test_t1_relations(self):
+        observer = Observer.objects.as_of(self.t1).filter(identity=self.o1.identity).first()
+        self.assertEqual(0, observer.subjects.all().count())
+
+    def test_t2_relations(self):
+        observer = Observer.objects.as_of(self.t2).filter(identity=self.o1.identity).first()
+        self.assertEqual(2, observer.subjects.all().count())
+
+    def test_t3_relations(self):
+        observer = Observer.objects.as_of(self.t3).filter(identity=self.o1.identity).first()
+        self.assertEqual(0, observer.subjects.all().count())
+
+
+class ReverseForeignKeyDirectAssignmentTests(TestCase):
+    def setUp(self):
+        # City is the referenced object, Team in the referring object.
+        # c1 will be explicitly cloned, but not it's teams.
+        # c10 will not be explicitly cloned, but one of it's teams will be.
+        self.c1 = City.objects.create(name="Oakland")
+        self.team1 = Team.objects.create(name="As")
+        self.team2 = Team.objects.create(name="Raiders")
+
+        self.c10 = City.objects.create(name="San Francisco")
+        self.team10 = Team.objects.create(name="Giants")
+        self.team11 = Team.objects.create(name="49ers")
+
+        self.t1 = get_utc_now()
+        self.c1 = self.c1.clone()
+        self.c1.team_set.add(self.team1, self.team2)
+
+        self.team10 = self.team10.clone()
+        self.c10.team_set.add(self.team10, self.team11)
+
+        self.t2 = get_utc_now()
+        self.c1 = self.c1.clone()
+        self.c1.team_set = []
+
+        self.team10 = Team.objects.current.get(identity=self.team10.identity).clone()
+        self.c10.team_set = []
+        self.t3 = get_utc_now()
+
+    def test_t1_relations_for_cloned_referenced_object(self):
+        city = City.objects.as_of(self.t1).filter(identity=self.c1.identity).first()
+        self.assertEqual(0, city.team_set.all().count())
+
+    def test_t2_relations_for_cloned_referenced_object(self):
+        city = City.objects.as_of(self.t2).filter(identity=self.c1.identity).first()
+        self.assertEqual(2, city.team_set.all().count())
+
+    def test_t3_relations_for_cloned_referenced_object(self):
+        city = City.objects.as_of(self.t3).filter(identity=self.c1.identity).first()
+        self.assertEqual(0, city.team_set.all().count())
+
+    def test_t1_relations_for_cloned_referring_object(self):
+        city = City.objects.as_of(self.t1).filter(identity=self.c10.identity).first()
+        self.assertEqual(0, city.team_set.all().count())
+
+    def test_t2_relations_for_cloned_referring_object(self):
+        city = City.objects.as_of(self.t2).filter(identity=self.c10.identity).first()
+        self.assertEqual(2, city.team_set.all().count())
+
+    def test_t3_relations_for_cloned_referring_object(self):
+        city = City.objects.as_of(self.t3).filter(identity=self.c10.identity).first()
+        self.assertEqual(0, city.team_set.all().count())
+
 class PrefetchingTests(TestCase):
     def setUp(self):
         self.city1 = City.objects.create(name='Chicago')
@@ -2158,6 +2290,15 @@ class IntegrationNonVersionableModelsTests(TestCase):
         should_be_jacques_t1 = should_be_jacques.__class__.objects.as_of(self.t1).get(identity=should_be_jacques.identity)
         self.assertEqual(jacques_t1, should_be_jacques_t1)
 
+    def test_filter_on_fk_versioned_and_nonversioned_join(self):
+        # Get non-versioned objects, filtering on a FK-related versioned object
+        jacques_hats = WineDrinkerHat.objects.filter(wearer__name='Jacques').distinct()
+        self.assertEqual(set(jacques_hats), set([self.green_vagabond_hat, self.red_sailor_hat]))
+
+        # Get all versions of a Versionable by filtering on a FK-related non-versioned object
+        person_versions = WineDrinker.objects.filter(hats__shape='Vagabond')
+        self.assertIn(self.jacques, person_versions)
+
 
 class FilterOnForeignKeyRelationTest(TestCase):
     def test_filter_on_fk_relation(self):
@@ -2169,6 +2310,7 @@ class FilterOnForeignKeyRelationTest(TestCase):
         team.clone()
         l2 = len(Player.objects.as_of(t1).filter(team__name='team'))
         self.assertEqual(l1, l2)
+
 
 class SpecifiedUUIDTest(TestCase):
 
@@ -2282,6 +2424,9 @@ class VersionRestoreTest(TestCase):
         previous = Player.objects.previous_version(restored)
         self.assertSetEqual(set(previous.awards.all()), set(self.awards.values()))
         self.assertEqual(self.forty_niners, previous.team)
+
+        # There should be no overlap of version periods.
+        self.assertEquals(previous.version_end_date, restored.version_start_date)
 
     def test_restore_with_required_foreignkey(self):
         team = Team.objects.create(name="Flying Pigs")
