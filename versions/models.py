@@ -1479,6 +1479,7 @@ class Versionable(models.Model):
             latest = cls.objects.current_version(self, check_db=True)
             if latest and latest != self:
                 latest.delete()
+                restored.version_start_date = latest.version_end_date
 
             self.save()
             restored.save()
