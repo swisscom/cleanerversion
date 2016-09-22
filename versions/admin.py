@@ -12,7 +12,6 @@ from django.contrib.admin.options import get_content_type_for_model
 from django.utils.encoding import force_text
 from django.utils.text import capfirst
 from django.template.response import TemplateResponse
-from django import VERSION
 from datetime import datetime
 
 class DateTimeFilterForm(forms.Form):
@@ -239,8 +238,7 @@ class VersionedAdmin(admin.ModelAdmin):
             content_type=get_content_type_for_model(model)
         ).select_related().order_by('action_time')
 
-        ctx = self.admin_site.each_context() if VERSION < (1, 8) \
-            else self.admin_site.each_context(request)
+        ctx = self.admin_site.each_context(request)
 
         context = dict(ctx,
                        title=('Change history: %s') % force_text(obj),

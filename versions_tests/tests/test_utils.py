@@ -1,5 +1,4 @@
 from unittest import skipUnless
-from django import VERSION
 from django.db import connection
 from django.test import TestCase, TransactionTestCase
 from django.db import IntegrityError
@@ -7,10 +6,7 @@ from versions_tests.models import ChainStore, Color
 from versions.util.postgresql import get_uuid_like_indexes_on_table
 
 
-AT_LEAST_17 = VERSION[:2] >= (1, 7)
-
-
-@skipUnless(AT_LEAST_17 and connection.vendor == 'postgresql', "Postgresql-specific test")
+@skipUnless(connection.vendor == 'postgresql', "Postgresql-specific test")
 class PostgresqlVersionUniqueTests(TransactionTestCase):
     def setUp(self):
         self.red = Color.objects.create(name='red')
@@ -90,7 +86,7 @@ class PostgresqlVersionUniqueTests(TransactionTestCase):
             c.save()
 
 
-@skipUnless(AT_LEAST_17 and connection.vendor == 'postgresql', "Postgresql-specific test")
+@skipUnless(connection.vendor == 'postgresql', "Postgresql-specific test")
 class PostgresqlUuidLikeIndexesTest(TestCase):
     def test_no_like_indexes_on_uuid_columns(self):
         # Django creates like indexes on char columns.  In Django 1.7.x and below, there is no
