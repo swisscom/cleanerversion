@@ -2798,3 +2798,22 @@ class DeferredFieldsTest(TestCase):
         award2_light = Award.objects.current.only('name').get(identity=award2.identity)
         with self.assertNumQueries(1):
             self.assertSetEqual({player1.pk, player2.pk}, {o.pk for o in award2_light.players.all()})
+
+    def test_clone_of_deferred_object(self):
+        c1_v1_partial = City.objects.current.defer('name').get(pk=self.c1.pk)
+        self.assertRaisesMessage(
+            ValueError,
+            'Can not clone a model instance that has deferred fields',
+            c1_v1_partial.clone
+        )
+
+    def test_restore_of_deferred_object(self):
+        t1 = get_utc_now()
+        sleep(0.001)
+        c1_v2 = self.c1.clone()
+        c1_v1 = City.objects.as_of(t1).defer('name').get(identity=c1_v2.identity)
+        self.assertRaisesMessage(
+            ValueError,
+            'Can not restore a model instance that has deferred fields',
+            c1_v1.restore
+        )

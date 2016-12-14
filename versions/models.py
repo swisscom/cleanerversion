@@ -1315,6 +1315,14 @@ class Versionable(models.Model):
         else:
             forced_version_date = get_utc_now()
 
+        if self.get_deferred_fields():
+            # It would be necessary to fetch the record from the database again for this to succeed.
+            # Alternatively, perhaps it would be possible to create a copy of the object after
+            # fetching the missing fields.
+            # Doing so may be unexpected by the calling code, so raise an exception: the calling
+            # code should be adapted if necessary.
+            raise ValueError('Can not clone a model instance that has deferred fields')
+
         earlier_version = self
 
         later_version = copy.copy(earlier_version)
@@ -1419,6 +1427,14 @@ class Versionable(models.Model):
 
         if self.is_current:
             raise ValueError('This is the current version, no need to restore it.')
+
+        if self.get_deferred_fields():
+            # It would be necessary to fetch the record from the database again for this to succeed.
+            # Alternatively, perhaps it would be possible to create a copy of the object after
+            # fetching the missing fields.
+            # Doing so may be unexpected by the calling code, so raise an exception: the calling
+            # code should be adapted if necessary.
+            raise ValueError('Can not restore a model instance that has deferred fields')
 
         cls = self.__class__
         now = get_utc_now()
