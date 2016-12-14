@@ -705,6 +705,23 @@ Code::
     new_team_pk = Team.objects.current.get(name='Black Stripes').pk
     tiger = tiger_v4.restore(team_id=new_team_pk, age=33)
 
+Deferred fields
+===============
+It is not possible to clone or restore a version that has been fetched from the database without all
+of it's fields, for example using one of these three equivalent statements::
+
+    club = Club.objects.current.defer(
+        'phone', 'identity, 'version_start_date', 'version_end_date', 'version_birth_date'
+    ).first()
+    club = Club.objects.current.only('name').first()
+    club = Club.objects.raw("""
+        SELECT id, name FROM {} WHERE version_end_date IS NULL
+    """.format(Club._meta.db_table)[0]
+
+Trying to do so will raise a ValueError.  Any versioned object that needs to be cloned or restored
+must be fetched from the database without using ``defer()`` or ``only()`` (or ``raw()`` with only
+some of the model's fields).
+
 Unique Indexes
 ==============
 To have unique indexes with versioned models takes a bit of care. The issue here is that multiple versions having the same
