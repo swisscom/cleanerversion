@@ -16,7 +16,6 @@ import copy
 import datetime
 import uuid
 from collections import namedtuple
-import re
 
 from django.db.models.sql.datastructures import Join
 from django.apps.registry import apps
@@ -902,13 +901,9 @@ def create_versioned_many_related_manager(superclass, rel):
     class VersionedManyRelatedManager(many_related_manager_klass):
         def __init__(self, *args, **kwargs):
             super(VersionedManyRelatedManager, self).__init__(*args, **kwargs)
-            # Additional core filters are: version_start_date <= t & (version_end_date > t | version_end_date IS NULL)
-            # but we cannot work with the Django core filters, since they don't support ORing filters, which
-            # is a thing we need to consider the "version_end_date IS NULL" case;
-            # So, we define our own set of core filters being applied when versioning
             try:
-                version_start_date_field = self.through._meta.get_field('version_start_date')
-                version_end_date_field = self.through._meta.get_field('version_end_date')
+                _ = self.through._meta.get_field('version_start_date')
+                _ = self.through._meta.get_field('version_end_date')
             except FieldDoesNotExist as e:
                 fields = [f.name for f in self.through._meta.get_fields()]
                 print(str(e) + "; available fields are " + ", ".join(fields))
@@ -1188,8 +1183,23 @@ class Versionable(models.Model):
 
     def __init__(self, *args, **kwargs):
         super(Versionable, self).__init__(*args, **kwargs)
+
         # _querytime is for library-internal use.
         self._querytime = QueryTime(time=None, active=False)
+
+        # Ensure that the versionable field values are set.
+        # If there are any deferred fields, then this instance is being initialized
+        # from data in the database, and thus these values will already be set (unless
+        # the fields are deferred, in which case they should not be set here).
+        if not self.get_deferred_fields():
+            if not getattr(self, 'version_start_date', None):
+                setattr(self, 'version_start_date', get_utc_now())
+            if not getattr(self, 'version_birth_date', None):
+                setattr(self, 'version_birth_date', self.version_start_date)
+            if not getattr(self, self.VERSION_IDENTIFIER_FIELD, None):
+                setattr(self, self.VERSION_IDENTIFIER_FIELD, self.uuid())
+            if not getattr(self, self.OBJECT_IDENTIFIER_FIELD, None):
+                setattr(self, self.OBJECT_IDENTIFIER_FIELD, getattr(self, self.VERSION_IDENTIFIER_FIELD))
 
     def delete(self, using=None):
         using = using or router.db_for_write(self.__class__, instance=self)
@@ -1305,6 +1315,14 @@ class Versionable(models.Model):
         else:
             forced_version_date = get_utc_now()
 
+        if self.get_deferred_fields():
+            # It would be necessary to fetch the record from the database again for this to succeed.
+            # Alternatively, perhaps it would be possible to create a copy of the object after
+            # fetching the missing fields.
+            # Doing so may be unexpected by the calling code, so raise an exception: the calling
+            # code should be adapted if necessary.
+            raise ValueError('Can not clone a model instance that has deferred fields')
+
         earlier_version = self
 
         later_version = copy.copy(earlier_version)
@@ -1410,6 +1428,14 @@ class Versionable(models.Model):
         if self.is_current:
             raise ValueError('This is the current version, no need to restore it.')
 
+        if self.get_deferred_fields():
+            # It would be necessary to fetch the record from the database again for this to succeed.
+            # Alternatively, perhaps it would be possible to create a copy of the object after
+            # fetching the missing fields.
+            # Doing so may be unexpected by the calling code, so raise an exception: the calling
+            # code should be adapted if necessary.
+            raise ValueError('Can not restore a model instance that has deferred fields')
+
         cls = self.__class__
         now = get_utc_now()
         restored = copy.copy(self)
@@ -1490,33 +1516,3 @@ class Versionable(models.Model):
 
         return (instance.version_start_date <= querytime.time
                 and (instance.version_end_date is None or instance.version_end_date > querytime.time))
-
-
-class VersionedManyToManyModel(object):
-    """
-    This class is used for holding signal handlers required for proper versioning
-    """
-
-    @staticmethod
-    def post_init_initialize(sender, instance, **kwargs):
-        """
-        This is the signal handler post-initializing the intermediate many-to-many model.
-        :param sender: The model class that just had an instance created.
-        :param instance: The actual instance of the model that's just been created.
-        :param kwargs: Required by Django definition
-        :return: None
-        """
-        if isinstance(instance, sender) and isinstance(instance, Versionable):
-            ident = Versionable.uuid()
-            now = get_utc_now()
-            if not hasattr(instance, 'version_start_date') or instance.version_start_date is None:
-                instance.version_start_date = now
-            if not hasattr(instance, 'version_birth_date') or instance.version_birth_date is None:
-                instance.version_birth_date = now
-            if not hasattr(instance, 'id') or not bool(instance.id):
-                instance.id = ident
-            if not hasattr(instance, 'identity') or not bool(instance.identity):
-                instance.identity = ident
-
-
-post_init.connect(VersionedManyToManyModel.post_init_initialize)
