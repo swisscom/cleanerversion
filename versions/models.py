@@ -18,12 +18,17 @@ import uuid
 from collections import namedtuple
 
 from django import VERSION
+from django.db.models.fields.related_descriptors import ForwardManyToOneDescriptor, ReverseManyToOneDescriptor, \
+    ManyToManyDescriptor, create_forward_many_to_many_manager
+from django.utils.functional import cached_property
 
+from versions.descriptors import VersionedForwardManyToOneDescriptor, VersionedReverseManyToOneDescriptor, \
+    VersionedManyToManyDescriptor
 from versions.util import get_utc_now
 
 from django.db.models.sql.datastructures import Join
 from django.apps.registry import apps
-from django.core.exceptions import SuspiciousOperation, ObjectDoesNotExist
+from django.core.exceptions import SuspiciousOperation, ObjectDoesNotExist, FieldDoesNotExist
 from django.db import models, router, transaction
 from django.db.models.base import Model
 from django.db.models import Q
@@ -31,10 +36,7 @@ from django.db.models.constants import LOOKUP_SEP
 from django.db.models.fields.related import ForeignKey, ManyToManyField, RECURSIVE_RELATIONSHIP_CONSTANT
 
 from django.db.models.query import QuerySet
-if VERSION[:2] >= (1, 9):
-    from django.db.models.query import ModelIterable
-else:
-    from django.db.models.query import ValuesListQuerySet, ValuesQuerySet
+from django.db.models.query import ModelIterable
 from django.db.models.sql import Query
 from django.db.models.sql.where import ExtraWhere, WhereNode
 from django.utils.timezone import utc
@@ -503,15 +505,10 @@ class VersionedQuerySet(QuerySet):
         """
         if self._result_cache is None:
             self._result_cache = list(self.iterator())
-            if VERSION[:2] >= (1, 9):
-                # TODO: Do we have to test for ValuesListIterable, ValuesIterable, and FlatValuesListIterable here?
-                if self._iterable_class == ModelIterable:
-                    for x in self._result_cache:
-                        self._set_item_querytime(x)
-            else:
-                if not isinstance(self, ValuesListQuerySet):
-                    for x in self._result_cache:
-                        self._set_item_querytime(x)
+            # TODO: Do we have to test for ValuesListIterable, ValuesIterable, and FlatValuesListIterable here?
+            if self._iterable_class == ModelIterable:
+                for x in self._result_cache:
+                    self._set_item_querytime(x)
         if self._prefetch_related_lookups and not self._prefetch_done:
             self._prefetch_related_objects()
 
@@ -601,7 +598,7 @@ class VersionedForeignKey(ForeignKey):
 
     def contribute_to_class(self, cls, name, virtual_only=False):
         super(VersionedForeignKey, self).contribute_to_class(cls, name, virtual_only)
-        setattr(cls, self.name, VersionedReverseSingleRelatedObjectDescriptor(self))
+        setattr(cls, self.name, VersionedForwardManyToOneDescriptor(self))
 
     def contribute_to_related_class(self, cls, related):
         """
@@ -612,7 +609,7 @@ class VersionedForeignKey(ForeignKey):
         super(VersionedForeignKey, self).contribute_to_related_class(cls, related)
         accessor_name = related.get_accessor_name()
         if hasattr(cls, accessor_name):
-            setattr(cls, accessor_name, VersionedForeignRelatedObjectsDescriptor(related))
+            setattr(cls, accessor_name, VersionedReverseManyToOneDescriptor(related))
 
     def get_extra_restriction(self, where_class, alias, remote_alias):
         """
@@ -677,7 +674,7 @@ class VersionedManyToManyField(ManyToManyField):
 
         # Overwrite the descriptor
         if hasattr(cls, self.name):
-            setattr(cls, self.name, VersionedReverseManyRelatedObjectsDescriptor(self))
+            setattr(cls, self.name, VersionedManyToManyDescriptor(self))
 
     def contribute_to_related_class(self, cls, related):
         """
@@ -686,7 +683,7 @@ class VersionedManyToManyField(ManyToManyField):
         super(VersionedManyToManyField, self).contribute_to_related_class(cls, related)
         accessor_name = related.get_accessor_name()
         if accessor_name and hasattr(cls, accessor_name):
-            descriptor = VersionedManyRelatedObjectsDescriptor(related, accessor_name)
+            descriptor = VersionedManyToManyDescriptor(related, accessor_name)
             setattr(cls, accessor_name, descriptor)
             if hasattr(cls._meta, 'many_to_many_related') and isinstance(cls._meta.many_to_many_related, list):
                 cls._meta.many_to_many_related.append(descriptor)
@@ -740,8 +737,10 @@ class VersionedManyToManyField(ManyToManyField):
         })
 
 
-class VersionedReverseSingleRelatedObjectDescriptor(ReverseSingleRelatedObjectDescriptor):
+class VersionedReverseSingleRelatedObjectDescriptor(ForwardManyToOneDescriptor):
     """
+    Django1.9 compatibility note: ReverseSingleRelatedObjectDescriptor becomes ForwardManyToOneDescriptor
+
     A ReverseSingleRelatedObjectDescriptor-typed object gets inserted, when a ForeignKey
     is defined in a Django model. This is one part of the analogue for versioned items.
 
@@ -782,8 +781,10 @@ class VersionedReverseSingleRelatedObjectDescriptor(ReverseSingleRelatedObjectDe
             return current_elt.__class__.objects.current.get(identity=current_elt.identity)
 
 
-class VersionedForeignRelatedObjectsDescriptor(ForeignRelatedObjectsDescriptor):
+class VersionedForeignRelatedObjectsDescriptor(ReverseManyToOneDescriptor):
     """
+    Django 1.9 compatibility note: ForeignRelatedObjectsDescriptor becomes ReverseManyToOneDescriptor
+
     This descriptor generates the manager class that is used on the related object of a ForeignKey relation
     (i.e. the reverse-ForeignKey field manager).
     """
@@ -815,7 +816,7 @@ class VersionedForeignRelatedObjectsDescriptor(ForeignRelatedObjectsDescriptor):
             def get_prefetch_queryset(self, instances, queryset=None):
                 """
                 Overrides RelatedManager's implementation of get_prefetch_queryset so that it works
-                nicely with VersionedQuerySets.  It ensures that identities and time-limited where
+                nicely with VersionedQuerySets. It ensures that identities and time-limited where
                 clauses are used when selecting related reverse foreign key objects.
                 """
                 if queryset is None:
@@ -893,7 +894,8 @@ def create_versioned_many_related_manager(superclass, rel):
     :param rel: Contains the ManyToMany relation
     :return: A subclass of ManyRelatedManager and Versionable
     """
-    many_related_manager_klass = create_many_related_manager(superclass, rel)
+    # Django 1.9 compatibility note: create_many_related_manager becomes create_forward_many_to_many_manager
+    many_related_manager_klass = create_forward_many_to_many_manager(superclass, rel)
 
     class VersionedManyRelatedManager(many_related_manager_klass):
         def __init__(self, *args, **kwargs):
@@ -1016,8 +1018,10 @@ def create_versioned_many_related_manager(superclass, rel):
     return VersionedManyRelatedManager
 
 
-class VersionedReverseManyRelatedObjectsDescriptor(ReverseManyRelatedObjectsDescriptor):
+class VersionedReverseManyRelatedObjectsDescriptor(ManyToManyDescriptor):
     """
+    Django 1.9 compatibility note: ReverseManyRelatedObjectsDescriptor becomes ManyToManyDescriptor (as well)
+
     Beside having a very long name, this class is useful when it comes to versioning the
     ReverseManyRelatedObjectsDescriptor (huhu!!). The main part is the exposure of the
     'related_manager_cls' property
@@ -1103,8 +1107,10 @@ class VersionedReverseManyRelatedObjectsDescriptor(ReverseManyRelatedObjectsDesc
         )
 
 
-class VersionedManyRelatedObjectsDescriptor(ManyRelatedObjectsDescriptor):
+class VersionedManyRelatedObjectsDescriptor(ManyToManyDescriptor):
     """
+    Django 1.9 compatibility note: ManyRelatedObjectsDescriptor becomes ManyToManyDescriptor
+
     Beside having a very long name, this class is useful when it comes to versioning the
     ManyRelatedObjectsDescriptor (huhu!!). The main part is the exposure of the
     'related_manager_cls' property
@@ -1475,10 +1481,7 @@ class Versionable(models.Model):
         opts = self._meta
         rel_field_names = [field.attname for field in opts.many_to_many]
         if hasattr(opts, 'many_to_many_related'):
-            if VERSION[:2] >= (1, 9):
-                rel_field_names += [rel.reverse for rel in opts.many_to_many_related]
-            else:
-                rel_field_names += [rel.via_field_name for rel in opts.many_to_many_related]
+            rel_field_names += [rel.reverse for rel in opts.many_to_many_related]
 
         return rel_field_names
 

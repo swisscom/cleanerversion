@@ -135,12 +135,11 @@ class VersionedCollector(Collector):
         Gets a QuerySet of current objects related to ``objs`` via the relation ``related``.
 
         """
-        if VERSION >= (1, 8):
-            related_model = related.related_model
-        else:
-            related_model = related.model
+        from versions.models import Versionable
+
+        related_model = related.related_model
         manager = related_model._base_manager
-        if issubclass(related_model, versions.models.Versionable):
+        if issubclass(related_model, Versionable):
             manager = manager.current
         return manager.using(self.using).filter(
             **{"%s__in" % related.field.name: objs}

@@ -1959,7 +1959,7 @@ class ReverseForeignKeyDirectAssignmentTests(TestCase):
         self.c1.team_set = []
 
         self.team10 = Team.objects.current.get(identity=self.team10.identity).clone()
-        self.c10.team_set = []
+        self.c10.team_set.clear()
         self.t3 = get_utc_now()
 
     def test_t1_relations_for_cloned_referenced_object(self):

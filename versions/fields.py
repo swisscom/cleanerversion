@@ -6,27 +6,17 @@ from django.db.models.fields.related import ForeignKey, ManyToManyField, RECURSI
 from django.db.models.sql.datastructures import Join
 from django.db.models.sql.where import ExtraWhere, WhereNode
 
-if VERSION[:2] >= (1, 9):
-    # With Django 1.9 related descriptor classes have been renamed:
-    # ReverseSingleRelatedObjectDescriptor => ForwardManyToOneDescriptor
-    # ForeignRelatedObjectsDescriptor => ReverseManyToOneDescriptor
-    # ReverseManyRelatedObjectsDescriptor => ManyToManyDescriptor
-    # ManyRelatedObjectsDescriptor => ManyToManyDescriptor
-    # (new) => ReverseOneToOneDescriptor
-    # from django.db.models.fields.related import (ForwardManyToOneDescriptor, ReverseManyToOneDescriptor,
-    #                                              ManyToManyDescriptor, ReverseOneToOneDescriptor)
-    from descriptors import (VersionedForwardManyToOneDescriptor,
-                                      VersionedReverseManyToOneDescriptor,
-                                      VersionedManyToManyDescriptor)
-else:
-    from descriptors import (VersionedReverseSingleRelatedObjectDescriptor,
-                                      VersionedForeignRelatedObjectsDescriptor,
-                                      VersionedReverseManyRelatedObjectsDescriptor,
-                                      VersionedManyRelatedObjectsDescriptor)
-    # from django.db.models.fields.related import (ReverseSingleRelatedObjectDescriptor,
-    #                                              ReverseManyRelatedObjectsDescriptor, ManyToManyField,
-    #                                              ManyRelatedObjectsDescriptor, create_many_related_manager,
-    #                                              ForeignRelatedObjectsDescriptor, RECURSIVE_RELATIONSHIP_CONSTANT)
+# With Django 1.9 related descriptor classes have been renamed:
+# ReverseSingleRelatedObjectDescriptor => ForwardManyToOneDescriptor
+# ForeignRelatedObjectsDescriptor => ReverseManyToOneDescriptor
+# ReverseManyRelatedObjectsDescriptor => ManyToManyDescriptor
+# ManyRelatedObjectsDescriptor => ManyToManyDescriptor
+# (new) => ReverseOneToOneDescriptor
+# from django.db.models.fields.related import (ForwardManyToOneDescriptor, ReverseManyToOneDescriptor,
+#                                              ManyToManyDescriptor, ReverseOneToOneDescriptor)
+from descriptors import (VersionedForwardManyToOneDescriptor,
+                                  VersionedReverseManyToOneDescriptor,
+                                  VersionedManyToManyDescriptor)
 from models import Versionable
 
 

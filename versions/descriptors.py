@@ -5,27 +5,18 @@ from django.db.models.base import Model
 from django.db.models.query_utils import Q
 
 from django.utils.functional import cached_property
-from versions.models import Versionable, VersionedQuerySet
 
 from versions.util import get_utc_now
 
-if VERSION[:2] >= (1, 9):
-    # With Django 1.9 related descriptor classes have been renamed:
-    # ReverseSingleRelatedObjectDescriptor => ForwardManyToOneDescriptor
-    # ForeignRelatedObjectsDescriptor => ReverseManyToOneDescriptor
-    # ReverseManyRelatedObjectsDescriptor => ManyToManyDescriptor
-    # ManyRelatedObjectsDescriptor => ManyToManyDescriptor
-    # (new) => ReverseOneToOneDescriptor
-    from django.db.models.fields.related import (ForwardManyToOneDescriptor, ReverseManyToOneDescriptor,
-                                                 ManyToManyDescriptor, ReverseOneToOneDescriptor)
-    from django.db.models.fields.related_descriptors import create_forward_many_to_many_manager
-else:
-    from django.db.models.fields.related import (ReverseSingleRelatedObjectDescriptor,
-                                                 ReverseManyRelatedObjectsDescriptor,
-                                                 ManyRelatedObjectsDescriptor,
-                                                 ForeignRelatedObjectsDescriptor,
-                                                 create_many_related_manager)
-
+# With Django 1.9 related descriptor classes have been renamed:
+# ReverseSingleRelatedObjectDescriptor => ForwardManyToOneDescriptor
+# ForeignRelatedObjectsDescriptor => ReverseManyToOneDescriptor
+# ReverseManyRelatedObjectsDescriptor => ManyToManyDescriptor
+# ManyRelatedObjectsDescriptor => ManyToManyDescriptor
+# (new) => ReverseOneToOneDescriptor
+from django.db.models.fields.related import (ForwardManyToOneDescriptor, ReverseManyToOneDescriptor,
+                                             ManyToManyDescriptor)
+from django.db.models.fields.related_descriptors import create_forward_many_to_many_manager
 
 
 def matches_querytime(instance, querytime):
@@ -44,25 +35,14 @@ def matches_querytime(instance, querytime):
     return (instance.version_start_date <= querytime.time
             and (instance.version_end_date is None or instance.version_end_date > querytime.time))
 
-if VERSION[:2] >= (1,9):
-    class VersionedForwardManyToOneDescriptor(ForwardManyToOneDescriptor):
-        """
 
-        """
-        pass
-    vforward_many_to_one_descriptor_class = VersionedForwardManyToOneDescriptor
-else:
-    class VersionedReverseSingleRelatedObjectDescriptor(ReverseSingleRelatedObjectDescriptor):
-        """
-        A ReverseSingleRelatedObjectDescriptor-typed object gets inserted, when a ForeignKey
-        is defined in a Django model. This is one part of the analogue for versioned items.
+class VersionedForwardManyToOneDescriptor(ForwardManyToOneDescriptor):
+    """
 
-        Unfortunately, we need to run two queries. The first query satisfies the foreign key
-        constraint. After extracting the identity information and combining it with the datetime-
-        stamp, we are able to fetch the historic element.
-        """
-        pass
-    vforward_many_to_one_descriptor_class = VersionedReverseSingleRelatedObjectDescriptor
+    """
+    pass
+vforward_many_to_one_descriptor_class = VersionedForwardManyToOneDescriptor
+
 
 def vforward_many_to_one_descriptor_getter(self, instance, instance_type=None):
     """
@@ -72,6 +52,7 @@ def vforward_many_to_one_descriptor_getter(self, instance, instance_type=None):
     :param instance_type: The type of the instance object
     :return: Returns a Versionable
     """
+    from versions.models import Versionable
     current_elt = super(self.__class__, self).__get__(instance, instance_type)
 
     if instance is None:
@@ -98,97 +79,120 @@ def vforward_many_to_one_descriptor_getter(self, instance, instance_type=None):
 vforward_many_to_one_descriptor_class.__get__ = vforward_many_to_one_descriptor_getter
 
 
+class VersionedReverseManyToOneDescriptor(ReverseManyToOneDescriptor):
+    @cached_property
+    def related_manager_cls(self):
+        # return create_versioned_related_manager
+        manager_cls = super(VersionedReverseManyToOneDescriptor, self).related_manager_cls
 
-if VERSION[:2] >= (1,9):
-    class VersionedReverseManyToOneDescriptor(ReverseManyToOneDescriptor):
-        pass
-
-    vreverse_many_to_one_descriptor_class = VersionedReverseManyToOneDescriptor
-else:
-    class VersionedForeignRelatedObjectsDescriptor(ForeignRelatedObjectsDescriptor):
-        """
-        This descriptor generates the manager class that is used on the related object of a ForeignKey relation
-        (i.e. the reverse-ForeignKey field manager).
-        """
-        pass
-
-    vreverse_many_to_one_descriptor_class = VersionedForeignRelatedObjectsDescriptor
-
-
-def vreverse_many_to_one_descriptor_related_manager_cls_property(self):
-    # return create_versioned_related_manager
-    manager_cls = super(self.__class__, self).related_manager_cls
-    if VERSION[:2] >= (1, 9):
+        #if VERSION[:2] >= (1, 9):
         # TODO: Define, what field has to be taken over here, self.rel/self.field? The WhineDrinker.hats test seems to be a good one for testing this
-	rel_field = self.rel
-    elif hasattr(self, 'related'):
-        rel_field = self.related.field
-    else:
+
+        # rel_field = self.rel
+
         rel_field = self.field
+        # elif hasattr(self, 'related'):
+        #     rel_field = self.related.field
+        # else:
+        #     rel_field = self.field
+        #     rel_field = self.rel
 
-    class VersionedRelatedManager(manager_cls):
-        def __init__(self, instance):
-            super(VersionedRelatedManager, self).__init__(instance)
+        class VersionedRelatedManager(manager_cls):
+            def __init__(self, instance):
+                super(VersionedRelatedManager, self).__init__(instance)
 
-            # This is a hack, in order to get the versioned related objects
-            for key in self.core_filters.keys():
-                if '__exact' in key or '__' not in key:
-                    self.core_filters[key] = instance.identity
+                # This is a hack, in order to get the versioned related objects
+                for key in self.core_filters.keys():
+                    if '__exact' in key or '__' not in key:
+                        self.core_filters[key] = instance.identity
 
-        def get_queryset(self):
-            queryset = super(VersionedRelatedManager, self).get_queryset()
-            # Do not set the query time if it is already correctly set.  queryset.as_of() returns a clone
-            # of the queryset, and this will destroy the prefetched objects cache if it exists.
-            if isinstance(queryset, VersionedQuerySet) \
-                    and self.instance._querytime.active \
-                    and queryset.querytime != self.instance._querytime:
-                queryset = queryset.as_of(self.instance._querytime.time)
-            return queryset
+            def get_queryset(self):
+                from versions.models import VersionedQuerySet
 
-        def add(self, *objs):
-            cloned_objs = ()
-            for obj in objs:
-                if not isinstance(obj, Versionable):
-                    raise TypeError("Trying to add a non-Versionable to a VersionedForeignKey relationship")
-                cloned_objs += (obj.clone(),)
-            super(VersionedRelatedManager, self).add(*cloned_objs)
+                queryset = super(VersionedRelatedManager, self).get_queryset()
+                # Do not set the query time if it is already correctly set.  queryset.as_of() returns a clone
+                # of the queryset, and this will destroy the prefetched objects cache if it exists.
+                if isinstance(queryset, VersionedQuerySet) \
+                        and self.instance._querytime.active \
+                        and queryset.querytime != self.instance._querytime:
+                    queryset = queryset.as_of(self.instance._querytime.time)
+                return queryset
 
-        # clear() and remove() are present if the FK is nullable
-        if 'clear' in dir(manager_cls):
-            def clear(self, **kwargs):
+            def get_prefetch_queryset(self, instances, queryset=None):
                 """
-                Overridden to ensure that the current queryset is used, and to clone objects before they
-                are removed, so that history is not lost.
+                Overrides RelatedManager's implementation of get_prefetch_queryset so that it works
+                nicely with VersionedQuerySets. It ensures that identities and time-limited where
+                clauses are used when selecting related reverse foreign key objects.
                 """
-                bulk = kwargs.pop('bulk', True)
-                db = router.db_for_write(self.model, instance=self.instance)
-                queryset = self.current.using(db)
-                with transaction.atomic(using=db, savepoint=False):
-                    cloned_pks = [obj.clone().pk for obj in queryset]
-                    update_qs = self.current.filter(pk__in=cloned_pks)
-                    if VERSION[:2] == (1, 6):
-                        update_qs.update(**{rel_field.name: None})
-                    else:
-                        self._clear(update_qs, bulk)
+                if queryset is None:
+                    # Note that this intentionally call's VersionManager's get_queryset, instead of simply calling
+                    # the superclasses' get_queryset (as the non-versioned RelatedManager does), because what is
+                    # needed is a simple Versioned queryset without any restrictions (e.g. do not
+                    # apply self.core_filters).
+                    from versions.models import VersionManager
+                    queryset = VersionManager.get_queryset(self)
 
-        if 'remove' in dir(manager_cls):
-            def remove(self, *objs):
-                val = rel_field.get_foreign_related_value(self.instance)
+                queryset._add_hints(instance=instances[0])
+                queryset = queryset.using(queryset._db or self._db)
+
+                rel_obj_attr = rel_field.get_local_related_value
+                instance_attr = rel_field.get_foreign_related_value
+                # Use identities instead of ids so that this will work with versioned objects.
+                instances_dict = {(inst.identity,): inst for inst in instances}
+                identities = [inst.identity for inst in instances]
+                query = {'%s__identity__in' % rel_field.name: identities}
+                queryset = queryset.filter(**query)
+
+                # Since we just bypassed this class' get_queryset(), we must manage
+                # the reverse relation manually.
+                for rel_obj in queryset:
+                    instance = instances_dict[rel_obj_attr(rel_obj)]
+                    setattr(rel_obj, rel_field.name, instance)
+                cache_name = rel_field.related_query_name()
+                return queryset, rel_obj_attr, instance_attr, False, cache_name
+
+            def add(self, *objs, **kwargs):
+                from versions.models import Versionable
                 cloned_objs = ()
                 for obj in objs:
-                    # Is obj actually part of this descriptor set? Otherwise, silently go over it, since Django
-                    # handles that case
-                    if rel_field.get_local_related_value(obj) == val:
-                        # Silently pass over non-versionable items
-                        if not isinstance(obj, Versionable):
-                            raise TypeError(
-                                "Trying to remove a non-Versionable from a VersionedForeignKey realtionship")
-                        cloned_objs += (obj.clone(),)
-                super(VersionedRelatedManager, self).remove(*cloned_objs)
+                    if not isinstance(obj, Versionable):
+                        raise TypeError("Trying to add a non-Versionable to a VersionedForeignKey relationship")
+                    cloned_objs += (obj.clone(),)
+                super(VersionedRelatedManager, self).add(*cloned_objs, **kwargs)
 
-    return VersionedRelatedManager
+            # clear() and remove() are present if the FK is nullable
+            if 'clear' in dir(manager_cls):
+                def clear(self, **kwargs):
+                    """
+                    Overridden to ensure that the current queryset is used, and to clone objects before they
+                    are removed, so that history is not lost.
+                    """
+                    bulk = kwargs.pop('bulk', True)
+                    db = router.db_for_write(self.model, instance=self.instance)
+                    queryset = self.current.using(db)
+                    with transaction.atomic(using=db, savepoint=False):
+                        cloned_pks = [obj.clone().pk for obj in queryset]
+                        update_qs = self.current.filter(pk__in=cloned_pks)
+                        self._clear(update_qs, bulk)
 
-vreverse_many_to_one_descriptor_class.related_manager_cls = cached_property(vreverse_many_to_one_descriptor_related_manager_cls_property)
+            if 'remove' in dir(manager_cls):
+                def remove(self, *objs, **kwargs):
+                    from versions.models import Versionable
+
+                    val = rel_field.get_foreign_related_value(self.instance)
+                    cloned_objs = ()
+                    for obj in objs:
+                        # Is obj actually part of this descriptor set? Otherwise, silently go over it, since Django
+                        # handles that case
+                        if rel_field.get_local_related_value(obj) == val:
+                            # Silently pass over non-versionable items
+                            if not isinstance(obj, Versionable):
+                                raise TypeError(
+                                    "Trying to remove a non-Versionable from a VersionedForeignKey realtionship")
+                            cloned_objs += (obj.clone(),)
+                    super(VersionedRelatedManager, self).remove(*cloned_objs, **kwargs)
+
+        return VersionedRelatedManager
 
 
 class VersionedManyToManyDescriptor(ManyToManyDescriptor):
@@ -270,117 +274,9 @@ class VersionedManyToManyDescriptor(ManyToManyDescriptor):
         """
         return {o.pk if isinstance(o, Model) else o for o in objects}
 
-if VERSION[:2] < (1, 9):
-    class VersionedReverseManyRelatedObjectsDescriptor(ReverseManyRelatedObjectsDescriptor):
-        """
-        Beside having a very long name, this class is useful when it comes to versioning the
-        ReverseManyRelatedObjectsDescriptor (huhu!!). The main part is the exposure of the
-        'related_manager_cls' property
-        """
-
-        def __set__(self, instance, value):
-            """
-            Completely overridden to avoid bulk deletion that happens when the parent method calls clear().
-
-            The parent method's logic is basically: clear all in bulk, then add the given objects in bulk.
-            Instead, we figure out which ones are being added and removed, and call add and remove for these values.
-            This lets us retain the versioning information.
-
-            Since this is a many-to-many relationship, it is assumed here that the django.db.models.deletion.Collector
-            logic, that is used in clear(), is not necessary here.  Collector collects related models, e.g. ones that should
-            also be deleted because they have a ON CASCADE DELETE relationship to the object, or, in the case of
-            "Multi-table inheritance", are parent objects.
-
-            :param instance: The instance on which the getter was called
-            :param value: iterable of items to set
-            """
-
-            if not instance.is_current:
-                raise SuspiciousOperation(
-                    "Related values can only be directly set on the current version of an object")
-
-            if not self.field.rel.through._meta.auto_created:
-                opts = self.field.rel.through._meta
-                raise AttributeError(("Cannot set values on a ManyToManyField which specifies an intermediary model. "
-                                      "Use %s.%s's Manager instead.") % (opts.app_label, opts.object_name))
-
-            manager = self.__get__(instance)
-            # Below comment is from parent __set__ method.  We'll force evaluation, too:
-            # clear() can change expected output of 'value' queryset, we force evaluation
-            # of queryset before clear; ticket #19816
-            value = tuple(value)
-
-            being_removed, being_added = self.get_current_m2m_diff(instance, value)
-            timestamp = get_utc_now()
-            manager.remove_at(timestamp, *being_removed)
-            manager.add_at(timestamp, *being_added)
-
-        def get_current_m2m_diff(self, instance, new_objects):
-            """
-            :param instance: Versionable object
-            :param new_objects: objects which are about to be associated with instance
-            :return: (being_removed id list, being_added id list)
-            :rtype : tuple
-            """
-            new_ids = self.pks_from_objects(new_objects)
-            relation_manager = self.__get__(instance)
-
-            filter = Q(**{relation_manager.source_field.attname: instance.pk})
-            qs = self.through.objects.current.filter(filter)
-            try:
-                # Django 1.7
-                target_name = relation_manager.target_field.attname
-            except AttributeError:
-                # Django 1.6
-                target_name = relation_manager.through._meta.get_field_by_name(
-                    relation_manager.target_field_name)[0].attname
-            current_ids = set(qs.values_list(target_name, flat=True))
-
-            being_removed = current_ids - new_ids
-            being_added = new_ids - current_ids
-            return list(being_removed), list(being_added)
-
-        def pks_from_objects(self, objects):
-            """
-            Extract all the primary key strings from the given objects.  Objects may be Versionables, or bare primary keys.
-            :rtype : set
-            """
-            return {o.pk if isinstance(o, Model) else o for o in objects}
-
-        @cached_property
-        def related_manager_cls(self):
-            return create_versioned_forward_many_to_many_manager(
-                self.field.rel.to._default_manager.__class__,
-                self.field.rel
-            )
-
-
-    class VersionedManyRelatedObjectsDescriptor(ManyRelatedObjectsDescriptor):
-        """
-        Beside having a very long name, this class is useful when it comes to versioning the
-        ManyRelatedObjectsDescriptor (huhu!!). The main part is the exposure of the
-        'related_manager_cls' property
-        """
-
-        # via_field_name = None
-
-        def __init__(self, related, via_field_name):
-            super(VersionedManyRelatedObjectsDescriptor, self).__init__(related)
-            self.via_field_name = via_field_name
-
-        @cached_property
-        def related_manager_cls(self):
-            return create_versioned_forward_many_to_many_manager(
-                self.related.model._default_manager.__class__,
-                self.related.field.rel
-            )
-
 
 def create_versioned_forward_many_to_many_manager(superclass, rel, reverse=None):
-    if VERSION[:2] >= (1, 9):
-        many_related_manager_klass = create_forward_many_to_many_manager(superclass, rel, reverse)
-    else:
-        many_related_manager_klass = create_many_related_manager(superclass, rel)
+    many_related_manager_klass = create_forward_many_to_many_manager(superclass, rel, reverse)
 
     class VersionedManyRelatedManager(many_related_manager_klass):
         def __init__(self, *args, **kwargs):
@@ -393,10 +289,8 @@ def create_versioned_forward_many_to_many_manager(superclass, rel, reverse=None)
                 version_start_date_field = self.through._meta.get_field('version_start_date')
                 version_end_date_field = self.through._meta.get_field('version_end_date')
             except FieldDoesNotExist as e:
-                if VERSION[:2] >= (1, 8):
-                    fields = [f.name for f in self.through._meta.get_fields()]
-                else:
-                    fields = self.through._meta.get_all_field_names()
+                fields = [f.name for f in self.through._meta.get_fields()]
+
                 print(str(e) + "; available fields are " + ", ".join(fields))
                 raise e
                 # FIXME: this probably does not work when auto-referencing
