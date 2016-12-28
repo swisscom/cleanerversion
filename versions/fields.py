@@ -1,6 +1,3 @@
-import six
-
-from django import VERSION
 from django.apps import apps
 from django.db.models.fields.related import ForeignKey, ManyToManyField, RECURSIVE_RELATIONSHIP_CONSTANT, \
     resolve_relation
