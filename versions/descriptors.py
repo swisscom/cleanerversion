@@ -286,11 +286,10 @@ def create_versioned_forward_many_to_many_manager(superclass, rel, reverse=None)
             # is a thing we need to consider the "version_end_date IS NULL" case;
             # So, we define our own set of core filters being applied when versioning
             try:
-                version_start_date_field = self.through._meta.get_field('version_start_date')
-                version_end_date_field = self.through._meta.get_field('version_end_date')
+                _ = self.through._meta.get_field('version_start_date')
+                _ = self.through._meta.get_field('version_end_date')
             except FieldDoesNotExist as e:
                 fields = [f.name for f in self.through._meta.get_fields()]
-
                 print(str(e) + "; available fields are " + ", ".join(fields))
                 raise e
                 # FIXME: this probably does not work when auto-referencing
@@ -327,9 +326,6 @@ def create_versioned_forward_many_to_many_manager(superclass, rel, reverse=None)
                         # The Django 1.7-way is preferred
                         if hasattr(self, 'target_field'):
                             fk_val = self.target_field.get_foreign_related_value(obj)[0]
-                        # But the Django 1.6.x -way is supported for backward compatibility
-                        elif hasattr(self, '_get_fk_val'):
-                            fk_val = self._get_fk_val(obj, target_field_name)
                         else:
                             raise TypeError("We couldn't find the value of the foreign key, this might be due to the "
                                             "use of an unsupported version of Django")
@@ -406,5 +402,3 @@ def create_versioned_forward_many_to_many_manager(superclass, rel, reverse=None)
             remove_at.alters_data = True
 
     return VersionedManyRelatedManager
-
-# create_versioned_many_related_manager = create_versioned_forward_many_to_many_manager

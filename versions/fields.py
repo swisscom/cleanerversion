@@ -2,7 +2,8 @@ import six
 
 from django import VERSION
 from django.apps import apps
-from django.db.models.fields.related import ForeignKey, ManyToManyField, RECURSIVE_RELATIONSHIP_CONSTANT
+from django.db.models.fields.related import ForeignKey, ManyToManyField, RECURSIVE_RELATIONSHIP_CONSTANT, \
+    resolve_relation
 from django.db.models.sql.datastructures import Join
 from django.db.models.sql.where import ExtraWhere, WhereNode
 
@@ -14,6 +15,8 @@ from django.db.models.sql.where import ExtraWhere, WhereNode
 # (new) => ReverseOneToOneDescriptor
 # from django.db.models.fields.related import (ForwardManyToOneDescriptor, ReverseManyToOneDescriptor,
 #                                              ManyToManyDescriptor, ReverseOneToOneDescriptor)
+from django.db.models.utils import make_model_tuple
+
 from descriptors import (VersionedForwardManyToOneDescriptor,
                                   VersionedReverseManyToOneDescriptor,
                                   VersionedManyToManyDescriptor)
@@ -33,10 +36,7 @@ class VersionedForeignKey(ForeignKey):
 
     def contribute_to_class(self, cls, name, virtual_only=False):
         super(VersionedForeignKey, self).contribute_to_class(cls, name, virtual_only)
-        if VERSION[:2] >= (1, 9):
-            setattr(cls, self.name, VersionedForwardManyToOneDescriptor(self))
-        else:
-            setattr(cls, self.name, VersionedReverseSingleRelatedObjectDescriptor(self))
+        setattr(cls, self.name, VersionedForwardManyToOneDescriptor(self))
 
     def contribute_to_related_class(self, cls, related):
         """
@@ -47,10 +47,7 @@ class VersionedForeignKey(ForeignKey):
         super(VersionedForeignKey, self).contribute_to_related_class(cls, related)
         accessor_name = related.get_accessor_name()
         if hasattr(cls, accessor_name):
-            if VERSION[:2] >= (1, 9):
-                setattr(cls, accessor_name, VersionedReverseManyToOneDescriptor(related))
-            else:
-                setattr(cls, accessor_name, VersionedForeignRelatedObjectsDescriptor(related))
+            setattr(cls, accessor_name, VersionedReverseManyToOneDescriptor(related))
 
     def get_extra_restriction(self, where_class, alias, remote_alias):
         """
@@ -95,10 +92,11 @@ class VersionedManyToManyField(ManyToManyField):
     def __init__(self, *args, **kwargs):
         super(VersionedManyToManyField, self).__init__(*args, **kwargs)
 
-    def contribute_to_class(self, cls, name):
+    def contribute_to_class(self, cls, name, **kwargs):
         """
         Called at class type creation. So, this method is called, when metaclasses get created
         """
+        # TODO: Apply 3 edge cases when not to create an intermediary model specified in django.db.models.fields.related:1566
         # self.rel.through needs to be set prior to calling super, since super(...).contribute_to_class refers to it.
         # Classes pointed to by a string do not need to be resolved here, since Django does that at a later point in
         # time - which is nice... ;)
@@ -107,17 +105,14 @@ class VersionedManyToManyField(ManyToManyField):
         # - creating the through class if unset
         # - resolving the through class if it's a string
         # - resolving string references within the through class
-        if not self.rel.through and not cls._meta.abstract and not cls._meta.swapped:
-            self.rel.through = VersionedManyToManyField.create_versioned_many_to_many_intermediary_model(self, cls,
+        if not self.remote_field.through and not cls._meta.abstract and not cls._meta.swapped:
+            self.remote_field.through = VersionedManyToManyField.create_versioned_many_to_many_intermediary_model(self, cls,
                                                                                                          name)
         super(VersionedManyToManyField, self).contribute_to_class(cls, name)
 
         # Overwrite the descriptor
         if hasattr(cls, self.name):
-            if VERSION[:2] >= (1, 9):
-                setattr(cls, self.name, VersionedManyToManyDescriptor(self.remote_field))
-            else:
-                setattr(cls, self.name, VersionedReverseManyRelatedObjectsDescriptor(self))
+            setattr(cls, self.name, VersionedManyToManyDescriptor(self.remote_field))
 
     def contribute_to_related_class(self, cls, related):
         """
@@ -126,10 +121,7 @@ class VersionedManyToManyField(ManyToManyField):
         super(VersionedManyToManyField, self).contribute_to_related_class(cls, related)
         accessor_name = related.get_accessor_name()
         if accessor_name and hasattr(cls, accessor_name):
-            if VERSION[:2] >= (1, 9):
-                descriptor = VersionedManyToManyDescriptor(related, accessor_name)
-            else:
-                descriptor = VersionedManyRelatedObjectsDescriptor(related, accessor_name)
+            descriptor = VersionedManyToManyDescriptor(related, accessor_name)
             setattr(cls, accessor_name, descriptor)
             if hasattr(cls._meta, 'many_to_many_related') and isinstance(cls._meta.many_to_many_related, list):
                 cls._meta.many_to_many_related.append(descriptor)
@@ -138,38 +130,37 @@ class VersionedManyToManyField(ManyToManyField):
 
     @staticmethod
     def create_versioned_many_to_many_intermediary_model(field, cls, field_name):
+        # TODO: Verify functionality against django.db.models.fields.related:1048
         # Let's not care too much on what flags could potentially be set on that intermediary class (e.g. managed, etc)
         # Let's play the game, as if the programmer had specified a class within his models... Here's how.
 
         from_ = cls._meta.model_name
-        to_model = field.rel.to
+        to_model = resolve_relation(cls, field.remote_field.model)
 
         # Force 'to' to be a string (and leave the hard work to Django)
-        if not isinstance(field.rel.to, six.string_types):
-            to_model = '%s.%s' % (field.rel.to._meta.app_label, field.rel.to._meta.object_name)
-            to = field.rel.to._meta.object_name.lower()
-        else:
-            to = to_model.lower()
+        to = make_model_tuple(to_model)[1]
+        # if not isinstance(field.rel.to, basestring):
+        #     to_model = '%s.%s' % (field.rel.to._meta.app_label, field.rel.to._meta.object_name)
+        #     to = field.rel.to._meta.object_name.lower()
+        # else:
+        #     to = to_model.lower()
         name = '%s_%s' % (from_, field_name)
 
-        if field.rel.to == RECURSIVE_RELATIONSHIP_CONSTANT or to == cls._meta.object_name:
-            from_ = 'from_%s' % to
+        if to == from_:
+            from_ = 'from_%s' % from_
             to = 'to_%s' % to
-            to_model = cls
 
         # Since Django 1.7, a migration mechanism is shipped by default with Django. This migration module loads all
         # declared apps' models inside a __fake__ module.
         # This means that the models can be already loaded and registered by their original module, when we
         # reach this point of the application and therefore there is no need to load them a second time.
-        if VERSION[:2] >= (1, 7) and cls.__module__ == '__fake__':
+        if cls.__module__ == '__fake__':
             try:
                 # Check the apps for an already registered model
-                if VERSION[:2] >= (1, 9):
-                    return apps.get_model(cls._meta.app_label, str(name))
-                else:
-                    return apps.get_registered_model(cls._meta.app_label, str(name))
+                return apps.get_model(cls._meta.app_label, str(name))
             except KeyError:
                 # The model has not been registered yet, so continue
+                # TODO: Do we need to handle migrations differently here for intermediary M2M models?
                 pass
 
         meta = type('Meta', (object,), {
@@ -177,6 +168,9 @@ class VersionedManyToManyField(ManyToManyField):
             'auto_created': cls,
             'db_tablespace': cls._meta.db_tablespace,
             'app_label': cls._meta.app_label,
+            'verbose_name': '%(from)s-%(to)s relationship' % {'from': from_, 'to': to},
+            'verbose_name_plural': '%(from)s-%(to)s relationships' % {'from': from_, 'to': to},
+            'apps': cls._meta.apps,
         })
         return type(str(name), (Versionable,), {
             'Meta': meta,
