@@ -1,9 +1,9 @@
-from django import VERSION
 from django.db.models.deletion import (
     attrgetter, signals, six, sql, transaction,
     CASCADE,
     Collector,
 )
+
 import versions.models
 
 
@@ -68,7 +68,8 @@ class VersionedCollector(Collector):
                         # In the case of a SET.. method, clone before changing the value (if it hasn't already been
                         # cloned)
                         updated_instances = set()
-                        if not(isinstance(field, versions.fields.VersionedForeignKey) and field.rel.on_delete == CASCADE):
+                        if not (
+                            isinstance(field, versions.fields.VersionedForeignKey) and field.rel.on_delete == CASCADE):
                             for instance in instances:
                                 # Clone before updating
                                 cloned = id_map.get(instance.pk, None)
@@ -76,7 +77,7 @@ class VersionedCollector(Collector):
                                     cloned = instance.clone()
                                 id_map[instance.pk] = cloned
                                 updated_instances.add(cloned)
-                                #TODO: instance should get updated with new values from clone ?
+                                # TODO: instance should get updated with new values from clone ?
                         instances_for_fieldvalues[(field, value)] = updated_instances
 
                 # Replace the instances with their clones in self.data, too

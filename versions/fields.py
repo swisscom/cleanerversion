@@ -1,23 +1,14 @@
 from django.apps import apps
-from django.db.models.fields.related import ForeignKey, ManyToManyField, RECURSIVE_RELATIONSHIP_CONSTANT, \
+from django.db.models.fields.related import ForeignKey, ManyToManyField, \
     resolve_relation
 from django.db.models.sql.datastructures import Join
 from django.db.models.sql.where import ExtraWhere, WhereNode
-
-# With Django 1.9 related descriptor classes have been renamed:
-# ReverseSingleRelatedObjectDescriptor => ForwardManyToOneDescriptor
-# ForeignRelatedObjectsDescriptor => ReverseManyToOneDescriptor
-# ReverseManyRelatedObjectsDescriptor => ManyToManyDescriptor
-# ManyRelatedObjectsDescriptor => ManyToManyDescriptor
-# (new) => ReverseOneToOneDescriptor
-# from django.db.models.fields.related import (ForwardManyToOneDescriptor, ReverseManyToOneDescriptor,
-#                                              ManyToManyDescriptor, ReverseOneToOneDescriptor)
 from django.db.models.utils import make_model_tuple
 
-from descriptors import (VersionedForwardManyToOneDescriptor,
+from versions.descriptors import (VersionedForwardManyToOneDescriptor,
                                   VersionedReverseManyToOneDescriptor,
                                   VersionedManyToManyDescriptor)
-from models import Versionable
+from versions.models import Versionable
 
 
 class VersionedForeignKey(ForeignKey):
@@ -85,6 +76,7 @@ class VersionedForeignKey(ForeignKey):
             joining_columns = joining_columns + ((lhs_col_name, rhs_col_name),)
         return joining_columns
 
+
 class VersionedManyToManyField(ManyToManyField):
     def __init__(self, *args, **kwargs):
         super(VersionedManyToManyField, self).__init__(*args, **kwargs)
@@ -103,8 +95,9 @@ class VersionedManyToManyField(ManyToManyField):
         # - resolving the through class if it's a string
         # - resolving string references within the through class
         if not self.remote_field.through and not cls._meta.abstract and not cls._meta.swapped:
-            self.remote_field.through = VersionedManyToManyField.create_versioned_many_to_many_intermediary_model(self, cls,
-                                                                                                         name)
+            self.remote_field.through = VersionedManyToManyField.create_versioned_many_to_many_intermediary_model(self,
+                                                                                                                  cls,
+                                                                                                                  name)
         super(VersionedManyToManyField, self).contribute_to_class(cls, name)
 
         # Overwrite the descriptor
@@ -175,6 +168,7 @@ class VersionedManyToManyField(ManyToManyField):
             from_: VersionedForeignKey(cls, related_name='%s+' % name, auto_created=name),
             to: VersionedForeignKey(to_model, related_name='%s+' % name, auto_created=name),
         })
+
 
 class VersionedExtraWhere(ExtraWhere):
     """
@@ -257,22 +251,13 @@ class VersionedWhereNode(WhereNode):
         # self.children is an array of VersionedExtraWhere-objects
         for child in self.children:
             if isinstance(child, VersionedExtraWhere) and not child.params:
-                try:
-                    # Django 1.7 & 1.8 handles compilers as objects
-                    _query = qn.query
-                except AttributeError:
-                    # Django 1.6 handles compilers as instancemethods
-                    _query = qn.__self__.query
+                # Django 1.7 & 1.8 handles compilers as objects
+                _query = qn.query
                 query_time = _query.querytime.time
                 apply_query_time = _query.querytime.active
                 alias_map = _query.alias_map
-                # In Django 1.6 & 1.7, use the join_map to know, what *table* gets joined to which
-                # *left-hand sided* table
                 # In Django 1.8, use the Join objects in alias_map
-                if hasattr(_query, 'join_map'):
-                    self._set_child_joined_alias_using_join_map(child, _query.join_map, alias_map)
-                else:
-                    self._set_child_joined_alias(child, alias_map)
+                self._set_child_joined_alias(child, alias_map)
                 if apply_query_time:
                     # Add query parameters that have not been added till now
                     child.set_as_of(query_time)

@@ -17,33 +17,23 @@ import datetime
 import uuid
 from collections import namedtuple
 
-from django import VERSION
-from django.db.models.fields.related_descriptors import ForwardManyToOneDescriptor, ReverseManyToOneDescriptor, \
-    ManyToManyDescriptor, create_forward_many_to_many_manager
-from django.db.models.sql.query import Query
-from django.db.models.sql.where import ExtraWhere, WhereNode
-from django.utils.functional import cached_property
-
-from versions.descriptors import VersionedForwardManyToOneDescriptor, VersionedReverseManyToOneDescriptor, \
-    VersionedManyToManyDescriptor
-from versions.util import get_utc_now
-
-from django.db.models.sql.datastructures import Join
-from django.apps.registry import apps
-from django.core.exceptions import SuspiciousOperation, ObjectDoesNotExist, FieldDoesNotExist
+from django.core.exceptions import SuspiciousOperation, ObjectDoesNotExist
 from django.db import models, router, transaction
-from django.db.models.base import Model
 from django.db.models import Q
 from django.db.models.constants import LOOKUP_SEP
-from django.db.models.fields.related import ForeignKey, ManyToManyField, RECURSIVE_RELATIONSHIP_CONSTANT
-
+from django.db.models.fields.related import ForeignKey
 from django.db.models.query import QuerySet, ModelIterable
-from django.utils.timezone import utc
+from django.db.models.sql.datastructures import Join
+from django.db.models.sql.query import Query
+from django.db.models.sql.where import ExtraWhere, WhereNode
 from django.utils import six
+from django.utils.timezone import utc
 
+from versions.descriptors import VersionedForwardManyToOneDescriptor, VersionedReverseManyToOneDescriptor
+from versions.exceptions import DeletionOfNonCurrentVersionError
 from versions.settings import get_versioned_delete_collector_class
 from versions.settings import settings as versions_settings
-from versions.exceptions import DeletionOfNonCurrentVersionError
+from versions.util import get_utc_now
 
 
 def get_utc_now():
@@ -55,6 +45,7 @@ def validate_uuid(uuid_obj):
     Check that the UUID object is in fact a valid version 4 uuid.
     """
     return isinstance(uuid_obj, uuid.UUID) and uuid_obj.version == 4
+
 
 QueryTime = namedtuple('QueryTime', 'time active')
 
@@ -532,11 +523,6 @@ class VersionedQuerySet(QuerySet):
             item._querytime = self.querytime
         elif isinstance(item, VersionedQuerySet):
             item.querytime = self.querytime
-        elif isinstance(self, ValuesQuerySet):
-            # When we are dealing with a ValueQuerySet there is no point in
-            # setting the query_time as we are returning an array of values
-            # instead of a full-fledged model object
-            pass
         else:
             if type_check:
                 raise TypeError("This item is not a Versionable, it's a " + str(type(item)))

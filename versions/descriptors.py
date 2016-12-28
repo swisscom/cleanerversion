@@ -1,22 +1,13 @@
-from django import VERSION
 from django.core.exceptions import SuspiciousOperation, FieldDoesNotExist
 from django.db import router, transaction
 from django.db.models.base import Model
-from django.db.models.query_utils import Q
-
-from django.utils.functional import cached_property
-
-from versions.util import get_utc_now
-
-# With Django 1.9 related descriptor classes have been renamed:
-# ReverseSingleRelatedObjectDescriptor => ForwardManyToOneDescriptor
-# ForeignRelatedObjectsDescriptor => ReverseManyToOneDescriptor
-# ReverseManyRelatedObjectsDescriptor => ManyToManyDescriptor
-# ManyRelatedObjectsDescriptor => ManyToManyDescriptor
-# (new) => ReverseOneToOneDescriptor
 from django.db.models.fields.related import (ForwardManyToOneDescriptor, ReverseManyToOneDescriptor,
                                              ManyToManyDescriptor)
 from django.db.models.fields.related_descriptors import create_forward_many_to_many_manager
+from django.db.models.query_utils import Q
+from django.utils.functional import cached_property
+
+from versions.util import get_utc_now
 
 
 def matches_querytime(instance, querytime):
@@ -41,6 +32,8 @@ class VersionedForwardManyToOneDescriptor(ForwardManyToOneDescriptor):
 
     """
     pass
+
+
 vforward_many_to_one_descriptor_class = VersionedForwardManyToOneDescriptor
 
 
@@ -76,6 +69,7 @@ def vforward_many_to_one_descriptor_getter(self, instance, instance_type=None):
     else:
         return current_elt.__class__.objects.current.get(identity=current_elt.identity)
 
+
 vforward_many_to_one_descriptor_class.__get__ = vforward_many_to_one_descriptor_getter
 
 
@@ -85,12 +79,13 @@ class VersionedReverseManyToOneDescriptor(ReverseManyToOneDescriptor):
         # return create_versioned_related_manager
         manager_cls = super(VersionedReverseManyToOneDescriptor, self).related_manager_cls
 
-        #if VERSION[:2] >= (1, 9):
+        # if VERSION[:2] >= (1, 9):
         # TODO: Define, what field has to be taken over here, self.rel/self.field? The WhineDrinker.hats test seems to be a good one for testing this
 
         # rel_field = self.rel
 
         rel_field = self.field
+
         # elif hasattr(self, 'related'):
         #     rel_field = self.related.field
         # else:
