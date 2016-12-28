@@ -38,12 +38,8 @@ from versions_tests.models import (
 
 
 def get_relation_table(model_class, fieldname):
-
-    if VERSION[:2] >= (1, 8):
-        field_object = model_class._meta.get_field(fieldname)
-        direct = not field_object.auto_created or field_object.concrete
-    else:
-        field_object, _, direct, _ = model_class._meta.get_field_by_name(fieldname)
+    field_object = model_class._meta.get_field(fieldname)
+    direct = not field_object.auto_created or field_object.concrete
 
     if direct:
         field = field_object
