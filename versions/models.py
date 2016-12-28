@@ -16,18 +16,16 @@ import copy
 import datetime
 import uuid
 from collections import namedtuple
-import re
 
 from django import VERSION
 
 from versions.util import get_utc_now
 
-if VERSION[:2] >= (1, 8):
-    from django.db.models.sql.datastructures import Join
-if VERSION[:2] >= (1, 7):
-    from django.apps.registry import apps
+from django.db.models.sql.datastructures import Join
+from django.apps.registry import apps
 from django.core.exceptions import SuspiciousOperation, ObjectDoesNotExist
-from django.db import transaction
+from django.db import models, router, transaction
+from django.db.models.base import Model
 from django.db.models import Q
 from django.db.models.constants import LOOKUP_SEP
 from django.db.models.fields.related import ForeignKey, ManyToManyField, RECURSIVE_RELATIONSHIP_CONSTANT
@@ -37,17 +35,25 @@ if VERSION[:2] >= (1, 9):
     from django.db.models.query import ModelIterable
 else:
     from django.db.models.query import ValuesListQuerySet, ValuesQuerySet
-from django.db.models.signals import post_init
 from django.db.models.sql import Query
 from django.db.models.sql.where import ExtraWhere, WhereNode
 from django.utils.timezone import utc
 from django.utils import six
 
-from django.db import models, router
-
-from versions import settings as versions_settings
+from versions.settings import get_versioned_delete_collector_class
+from versions.settings import settings as versions_settings
 from versions.exceptions import DeletionOfNonCurrentVersionError
 
+
+def get_utc_now():
+    return datetime.datetime.utcnow().replace(tzinfo=utc)
+
+
+def validate_uuid(uuid_obj):
+    """
+    Check that the UUID object is in fact a valid version 4 uuid.
+    """
+    return isinstance(uuid_obj, uuid.UUID) and uuid_obj.version == 4
 
 QueryTime = namedtuple('QueryTime', 'time active')
 
@@ -61,11 +67,6 @@ class VersionManager(models.Manager):
     This is the Manager-class for any class that inherits from Versionable
     """
     use_for_related_fields = True
-
-    # Based on http://en.wikipedia.org/wiki/Universally_unique_identifier#Version_4_.28random.29
-    # Matches a valid hyphen-separated version 4 UUID string.
-    uuid_valid_form_regex = re.compile(
-        '^[A-Fa-f0-9]{8}-[A-Fa-f0-9]{4}-4[A-Fa-f0-9]{3}-[89aAbB][A-Fa-f0-9]{3}-[A-Fa-f0-9]{12}$')
 
     def get_queryset(self):
         """
@@ -246,24 +247,14 @@ class VersionManager(models.Manager):
 
         Create a Versionable having a version_start_date and version_birth_date set to some pre-defined timestamp
         :param timestamp: point in time at which the instance has to be created
-        :param id: version 4 UUID unicode string.  Usually this is not specified, it will be automatically created.
-        :param forced_identity: version 4 UUID unicode string.  For internal use only.
+        :param id: version 4 UUID unicode object.  Usually this is not specified, it will be automatically created.
+        :param forced_identity: version 4 UUID unicode object.  For internal use only.
         :param kwargs: arguments needed for initializing the instance
         :return: an instance of the class
         """
-        if id:
-            if not self.validate_uuid(id):
-                raise ValueError("id, if provided, must be a valid UUID version 4 string")
-            # Ensure that it's a unicode string:
-            id = six.text_type(id)
-
-        else:
-            id = Versionable.uuid()
-
+        id = Versionable.uuid(id)
         if forced_identity:
-            if not self.validate_uuid(forced_identity):
-                raise ValueError("forced_identity, if provided, must be a valid UUID version 4 string")
-            ident = six.text_type(forced_identity)
+            ident = Versionable.uuid(forced_identity)
         else:
             ident = id
 
@@ -275,14 +266,104 @@ class VersionManager(models.Manager):
         kwargs['version_birth_date'] = timestamp
         return super(VersionManager, self).create(**kwargs)
 
-    def validate_uuid(self, uuid_string):
+
+class VersionedWhereNode(WhereNode):
+    def as_sql(self, qn, connection):
         """
-        Check that the UUID string is in fact a valid uuid.
+        This method identifies joined table aliases in order for VersionedExtraWhere.as_sql()
+        to be able to add time restrictions for those tables based on the VersionedQuery's
+        querytime value.
+
+        :param qn: In Django 1.7 & 1.8 this is a compiler
+        :param connection: A DB connection
+        :return: A tuple consisting of (sql_string, result_params)
         """
-        return self.uuid_valid_form_regex.match(uuid_string) is not None
+        # self.children is an array of VersionedExtraWhere-objects
+        for child in self.children:
+            if isinstance(child, VersionedExtraWhere) and not child.params:
+                _query = qn.query
+                query_time = _query.querytime.time
+                apply_query_time = _query.querytime.active
+                alias_map = _query.alias_map
+                self._set_child_joined_alias(child, alias_map)
+                if apply_query_time:
+                    # Add query parameters that have not been added till now
+                    child.set_as_of(query_time)
+                else:
+                    # Remove the restriction if it's not required
+                    child.sqls = []
+        return super(VersionedWhereNode, self).as_sql(qn, connection)
+
+    @staticmethod
+    def _set_child_joined_alias(child, alias_map):
+        """
+        Set the joined alias on the child, for Django >= 1.8.0
+        :param child:
+        :param alias_map:
+        """
+        for table in alias_map:
+            join = alias_map[table]
+            if not isinstance(join, Join):
+                continue
+            lhs = join.parent_alias
+            if (lhs == child.alias and table == child.related_alias) \
+                    or (lhs == child.related_alias and table == child.alias):
+                child.set_joined_alias(table)
+                break
 
 
+class VersionedExtraWhere(ExtraWhere):
+    """
+    A specific implementation of ExtraWhere;
+    Before as_sql can be called on an object, ensure that calls to
+    - set_as_of and
+    - set_joined_alias
+    have been done
+    """
 
+    def __init__(self, historic_sql, current_sql, alias, remote_alias):
+        super(VersionedExtraWhere, self).__init__(sqls=[], params=[])
+        self.historic_sql = historic_sql
+        self.current_sql = current_sql
+        self.alias = alias
+        self.related_alias = remote_alias
+        self._as_of_time_set = False
+        self.as_of_time = None
+        self._joined_alias = None
+
+    def set_as_of(self, as_of_time):
+        self.as_of_time = as_of_time
+        self._as_of_time_set = True
+
+    def set_joined_alias(self, joined_alias):
+        """
+        Takes the alias that is being joined to the query and applies the query
+        time constraint to its table
+
+        :param str joined_alias: The table name of the alias
+        """
+        self._joined_alias = joined_alias
+
+    def as_sql(self, qn=None, connection=None):
+        sql = ""
+        params = []
+
+        # Fail fast for inacceptable cases
+        if self._as_of_time_set and not self._joined_alias:
+            raise ValueError("joined_alias is not set, but as_of is; this is a conflict!")
+
+        # Set the SQL string in dependency of whether as_of_time was set or not
+        if self._as_of_time_set:
+            if self.as_of_time:
+                sql = self.historic_sql
+                params = [self.as_of_time] * 2
+                # 2 is the number of occurences of the timestamp in an as_of-filter expression
+            else:
+                # If as_of_time was set to None, we're dealing with a query for "current" values
+                sql = self.current_sql
+        else:
+            # No as_of_time has been set; Perhaps, as_of was not part of the query -> That's OK
+            pass
 
 
 class VersionedQuery(Query):
@@ -440,23 +521,6 @@ class VersionedQuerySet(QuerySet):
         :param kwargs: Same as the original QuerySet._clone params
         :return: Just as QuerySet._clone, this method returns a clone of the original object
         """
-        if VERSION[:2] == (1, 6):
-            klass = kwargs.pop('klass', None)
-            # This patch was taken from Django 1.7 and is applied only in case we're using Django 1.6 and
-            # ValuesListQuerySet objects. Since VersionedQuerySet is not a subclass of ValuesListQuerySet, a new type
-            # inheriting from both is created and used as class.
-            # https://github.com/django/django/blob/1.7/django/db/models/query.py#L943
-            if klass and not issubclass(self.__class__, klass):
-                base_queryset_class = getattr(self, '_base_queryset_class', self.__class__)
-                class_bases = (klass, base_queryset_class)
-                class_dict = {
-                    '_base_queryset_class': base_queryset_class,
-                    '_specialized_queryset_class': klass,
-                }
-                kwargs['klass'] = type(klass.__name__, class_bases, class_dict)
-            else:
-                kwargs['klass'] = klass
-
         clone = super(VersionedQuerySet, self)._clone(**kwargs)
         clone.querytime = self.querytime
         return clone
@@ -512,7 +576,7 @@ class VersionedQuerySet(QuerySet):
         del_query.query.select_related = False
         del_query.query.clear_ordering(force_empty=True)
 
-        collector_class = versions_settings.get_versioned_delete_collector_class()
+        collector_class = get_versioned_delete_collector_class()
         collector = collector_class(using=del_query.db)
         collector.collect(del_query)
         collector.delete(get_utc_now())
@@ -524,6 +588,551 @@ class VersionedQuerySet(QuerySet):
     delete.queryset_only = True
 
 
+class VersionedForeignKey(ForeignKey):
+    """
+    We need to replace the standard ForeignKey declaration in order to be able to introduce
+    the VersionedReverseSingleRelatedObjectDescriptor, which allows to go back in time...
+    We also want to allow keeping track of any as_of time so that joins can be restricted
+    based on that.
+    """
+
+    def __init__(self, *args, **kwargs):
+        super(VersionedForeignKey, self).__init__(*args, **kwargs)
+
+    def contribute_to_class(self, cls, name, virtual_only=False):
+        super(VersionedForeignKey, self).contribute_to_class(cls, name, virtual_only)
+        setattr(cls, self.name, VersionedReverseSingleRelatedObjectDescriptor(self))
+
+    def contribute_to_related_class(self, cls, related):
+        """
+        Override ForeignKey's methods, and replace the descriptor, if set by the parent's methods
+        """
+        # Internal FK's - i.e., those with a related name ending with '+' -
+        # and swapped models don't get a related descriptor.
+        super(VersionedForeignKey, self).contribute_to_related_class(cls, related)
+        accessor_name = related.get_accessor_name()
+        if hasattr(cls, accessor_name):
+            setattr(cls, accessor_name, VersionedForeignRelatedObjectsDescriptor(related))
+
+    def get_extra_restriction(self, where_class, alias, remote_alias):
+        """
+        Overrides ForeignObject's get_extra_restriction function that returns an SQL statement which is appended to a
+        JOIN's conditional filtering part
+
+        :return: SQL conditional statement
+        :rtype: WhereNode
+        """
+        historic_sql = '''{alias}.version_start_date <= %s
+                 AND ({alias}.version_end_date > %s OR {alias}.version_end_date is NULL )'''
+        current_sql = '''{alias}.version_end_date is NULL'''
+        # How 'bout creating an ExtraWhere here, without params
+        return where_class([VersionedExtraWhere(historic_sql=historic_sql, current_sql=current_sql, alias=alias,
+                                                remote_alias=remote_alias)])
+
+    def get_joining_columns(self, reverse_join=False):
+        """
+        Get and return joining columns defined by this foreign key relationship
+
+        :return: A tuple containing the column names of the tables to be joined (<local_col_name>, <remote_col_name>)
+        :rtype: tuple
+        """
+        source = self.reverse_related_fields if reverse_join else self.related_fields
+        joining_columns = tuple()
+        for lhs_field, rhs_field in source:
+            lhs_col_name = lhs_field.column
+            rhs_col_name = rhs_field.column
+            # Test whether
+            # - self is the current ForeignKey relationship
+            # - self was not auto_created (e.g. is not part of a M2M relationship)
+            if self is lhs_field and not self.auto_created:
+                if rhs_col_name == Versionable.VERSION_IDENTIFIER_FIELD:
+                    rhs_col_name = Versionable.OBJECT_IDENTIFIER_FIELD
+            elif self is rhs_field and not self.auto_created:
+                if lhs_col_name == Versionable.VERSION_IDENTIFIER_FIELD:
+                    lhs_col_name = Versionable.OBJECT_IDENTIFIER_FIELD
+            joining_columns = joining_columns + ((lhs_col_name, rhs_col_name),)
+        return joining_columns
+
+
+class VersionedManyToManyField(ManyToManyField):
+    def __init__(self, *args, **kwargs):
+        super(VersionedManyToManyField, self).__init__(*args, **kwargs)
+
+    def contribute_to_class(self, cls, name):
+        """
+        Called at class type creation. So, this method is called, when metaclasses get created
+        """
+        # self.rel.through needs to be set prior to calling super, since super(...).contribute_to_class refers to it.
+        # Classes pointed to by a string do not need to be resolved here, since Django does that at a later point in
+        # time - which is nice... ;)
+        #
+        # Superclasses take care of:
+        # - creating the through class if unset
+        # - resolving the through class if it's a string
+        # - resolving string references within the through class
+        if not self.rel.through and not cls._meta.abstract and not cls._meta.swapped:
+            self.rel.through = VersionedManyToManyField.create_versioned_many_to_many_intermediary_model(self, cls,
+                                                                                                         name)
+        super(VersionedManyToManyField, self).contribute_to_class(cls, name)
+
+        # Overwrite the descriptor
+        if hasattr(cls, self.name):
+            setattr(cls, self.name, VersionedReverseManyRelatedObjectsDescriptor(self))
+
+    def contribute_to_related_class(self, cls, related):
+        """
+        Called at class type creation. So, this method is called, when metaclasses get created
+        """
+        super(VersionedManyToManyField, self).contribute_to_related_class(cls, related)
+        accessor_name = related.get_accessor_name()
+        if accessor_name and hasattr(cls, accessor_name):
+            descriptor = VersionedManyRelatedObjectsDescriptor(related, accessor_name)
+            setattr(cls, accessor_name, descriptor)
+            if hasattr(cls._meta, 'many_to_many_related') and isinstance(cls._meta.many_to_many_related, list):
+                cls._meta.many_to_many_related.append(descriptor)
+            else:
+                cls._meta.many_to_many_related = [descriptor]
+
+    @staticmethod
+    def create_versioned_many_to_many_intermediary_model(field, cls, field_name):
+        # Let's not care too much on what flags could potentially be set on that intermediary class (e.g. managed, etc)
+        # Let's play the game, as if the programmer had specified a class within his models... Here's how.
+
+        from_ = cls._meta.model_name
+        to_model = field.rel.to
+
+        # Force 'to' to be a string (and leave the hard work to Django)
+        if not isinstance(field.rel.to, six.string_types):
+            to_model = '%s.%s' % (field.rel.to._meta.app_label, field.rel.to._meta.object_name)
+            to = field.rel.to._meta.object_name.lower()
+        else:
+            to = to_model.lower()
+        name = '%s_%s' % (from_, field_name)
+
+        if field.rel.to == RECURSIVE_RELATIONSHIP_CONSTANT or to == cls._meta.object_name:
+            from_ = 'from_%s' % to
+            to = 'to_%s' % to
+            to_model = cls
+
+        # Since Django 1.7, a migration mechanism is shipped by default with Django. This migration module loads all
+        # declared apps' models inside a __fake__ module.
+        # This means that the models can be already loaded and registered by their original module, when we
+        # reach this point of the application and therefore there is no need to load them a second time.
+        if cls.__module__ == '__fake__':
+            try:
+                # Check the apps for an already registered model
+                return apps.get_registered_model(cls._meta.app_label, str(name))
+            except KeyError:
+                # The model has not been registered yet, so continue
+                pass
+
+        meta = type('Meta', (object,), {
+            # 'unique_together': (from_, to),
+            'auto_created': cls,
+            'db_tablespace': cls._meta.db_tablespace,
+            'app_label': cls._meta.app_label,
+        })
+        return type(str(name), (Versionable,), {
+            'Meta': meta,
+            '__module__': cls.__module__,
+            from_: VersionedForeignKey(cls, related_name='%s+' % name, auto_created=name),
+            to: VersionedForeignKey(to_model, related_name='%s+' % name, auto_created=name),
+        })
+
+
+class VersionedReverseSingleRelatedObjectDescriptor(ReverseSingleRelatedObjectDescriptor):
+    """
+    A ReverseSingleRelatedObjectDescriptor-typed object gets inserted, when a ForeignKey
+    is defined in a Django model. This is one part of the analogue for versioned items.
+
+    Unfortunately, we need to run two queries. The first query satisfies the foreign key
+    constraint. After extracting the identity information and combining it with the datetime-
+    stamp, we are able to fetch the historic element.
+    """
+
+    def __get__(self, instance, instance_type=None):
+        """
+        The getter method returns the object, which points instance, e.g. choice.poll returns
+        a Poll instance, whereas the Poll class defines the ForeignKey.
+        :param instance: The object on which the property was accessed
+        :param instance_type: The type of the instance object
+        :return: Returns a Versionable
+        """
+        current_elt = super(VersionedReverseSingleRelatedObjectDescriptor, self).__get__(instance, instance_type)
+
+        if instance is None:
+            return self
+
+        if not current_elt:
+            return None
+
+        if not isinstance(current_elt, Versionable):
+            raise TypeError("VersionedForeignKey target is of type "
+                            + str(type(current_elt))
+                            + ", which is not a subclass of Versionable")
+
+        if hasattr(instance, '_querytime'):
+            # If current_elt matches the instance's querytime, there's no need to make a database query.
+            if Versionable.matches_querytime(current_elt, instance._querytime):
+                current_elt._querytime = instance._querytime
+                return current_elt
+
+            return current_elt.__class__.objects.as_of(instance._querytime.time).get(identity=current_elt.identity)
+        else:
+            return current_elt.__class__.objects.current.get(identity=current_elt.identity)
+
+
+class VersionedForeignRelatedObjectsDescriptor(ForeignRelatedObjectsDescriptor):
+    """
+    This descriptor generates the manager class that is used on the related object of a ForeignKey relation
+    (i.e. the reverse-ForeignKey field manager).
+    """
+
+    @cached_property
+    def related_manager_cls(self):
+        # return create_versioned_related_manager
+        manager_cls = super(VersionedForeignRelatedObjectsDescriptor, self).related_manager_cls
+        rel_field = self.related.field
+
+        class VersionedRelatedManager(manager_cls):
+            def __init__(self, instance):
+                super(VersionedRelatedManager, self).__init__(instance)
+
+                # This is a hack, in order to get the versioned related objects
+                for key in self.core_filters.keys():
+                    if '__exact' in key or '__' not in key:
+                        self.core_filters[key] = instance.identity
+
+            def get_queryset(self):
+                queryset = super(VersionedRelatedManager, self).get_queryset()
+                # Do not set the query time if it is already correctly set.  queryset.as_of() returns a clone
+                # of the queryset, and this will destroy the prefetched objects cache if it exists.
+                if isinstance(queryset,
+                              VersionedQuerySet) and self.instance._querytime.active and queryset.querytime != self.instance._querytime:
+                    queryset = queryset.as_of(self.instance._querytime.time)
+                return queryset
+
+            def get_prefetch_queryset(self, instances, queryset=None):
+                """
+                Overrides RelatedManager's implementation of get_prefetch_queryset so that it works
+                nicely with VersionedQuerySets.  It ensures that identities and time-limited where
+                clauses are used when selecting related reverse foreign key objects.
+                """
+                if queryset is None:
+                    # Note that this intentionally call's VersionManager's get_queryset, instead of simply calling
+                    # the superclasses' get_queryset (as the non-versioned RelatedManager does), because what is
+                    # needed is a simple Versioned queryset without any restrictions (e.g. do not
+                    # apply self.core_filters).
+                    queryset = VersionManager.get_queryset(self)
+
+                queryset._add_hints(instance=instances[0])
+                queryset = queryset.using(queryset._db or self._db)
+
+                rel_obj_attr = rel_field.get_local_related_value
+                instance_attr = rel_field.get_foreign_related_value
+                # Use identities instead of ids so that this will work with versioned objects.
+                instances_dict = {(inst.identity,): inst for inst in instances}
+                identities = [inst.identity for inst in instances]
+                query = {'%s__identity__in' % rel_field.name: identities}
+                queryset = queryset.filter(**query)
+
+                # Since we just bypassed this class' get_queryset(), we must manage
+                # the reverse relation manually.
+                for rel_obj in queryset:
+                    instance = instances_dict[rel_obj_attr(rel_obj)]
+                    setattr(rel_obj, rel_field.name, instance)
+                cache_name = rel_field.related_query_name()
+                return queryset, rel_obj_attr, instance_attr, False, cache_name
+
+            def add(self, *objs):
+                cloned_objs = ()
+                for obj in objs:
+                    if not isinstance(obj, Versionable):
+                        raise TypeError("Trying to add a non-Versionable to a VersionedForeignKey relationship")
+                    cloned_objs += (obj.clone(),)
+                super(VersionedRelatedManager, self).add(*cloned_objs)
+
+            # clear() and remove() are present if the FK is nullable
+            if 'clear' in dir(manager_cls):
+                def clear(self, **kwargs):
+                    """
+                    Overridden to ensure that the current queryset is used, and to clone objects before they
+                    are removed, so that history is not lost.
+                    """
+                    bulk = kwargs.pop('bulk', True)
+                    db = router.db_for_write(self.model, instance=self.instance)
+                    queryset = self.current.using(db)
+                    with transaction.atomic(using=db, savepoint=False):
+                        cloned_pks = [obj.clone().pk for obj in queryset]
+                        update_qs = self.current.filter(pk__in=cloned_pks)
+                        self._clear(update_qs, bulk)
+
+            if 'remove' in dir(manager_cls):
+                def remove(self, *objs):
+                    val = rel_field.get_foreign_related_value(self.instance)
+                    cloned_objs = ()
+                    for obj in objs:
+                        # Is obj actually part of this descriptor set? Otherwise, silently go over it, since Django
+                        # handles that case
+                        if rel_field.get_local_related_value(obj) == val:
+                            # Silently pass over non-versionable items
+                            if not isinstance(obj, Versionable):
+                                raise TypeError(
+                                    "Trying to remove a non-Versionable from a VersionedForeignKey realtionship")
+                            cloned_objs += (obj.clone(),)
+                    super(VersionedRelatedManager, self).remove(*cloned_objs)
+
+        return VersionedRelatedManager
+
+
+def create_versioned_many_related_manager(superclass, rel):
+    """
+    The "casting" which is done in this method is needed, since otherwise, the methods introduced by
+    Versionable are not taken into account.
+    :param superclass: This is usually a models.Manager
+    :param rel: Contains the ManyToMany relation
+    :return: A subclass of ManyRelatedManager and Versionable
+    """
+    many_related_manager_klass = create_many_related_manager(superclass, rel)
+
+    class VersionedManyRelatedManager(many_related_manager_klass):
+        def __init__(self, *args, **kwargs):
+            super(VersionedManyRelatedManager, self).__init__(*args, **kwargs)
+            try:
+                _ = self.through._meta.get_field('version_start_date')
+                _ = self.through._meta.get_field('version_end_date')
+            except FieldDoesNotExist as e:
+                fields = [f.name for f in self.through._meta.get_fields()]
+                print(str(e) + "; available fields are " + ", ".join(fields))
+                raise e
+                # FIXME: this probably does not work when auto-referencing
+
+        def get_queryset(self):
+            """
+            Add a filter to the queryset, limiting the results to be pointed by relationship that are
+            valid for the given timestamp (which is taken at the current instance, or set to now, if not
+            available).
+            Long story short, apply the temporal validity filter also to the intermediary model.
+            """
+
+            queryset = super(VersionedManyRelatedManager, self).get_queryset()
+            if hasattr(queryset, 'querytime'):
+                if self.instance._querytime.active and self.instance._querytime != queryset.querytime:
+                    queryset = queryset.as_of(self.instance._querytime.time)
+            return queryset
+
+        def _remove_items(self, source_field_name, target_field_name, *objs):
+            """
+            Instead of removing items, we simply set the version_end_date of the current item to the
+            current timestamp --> t[now].
+            Like that, there is no more current entry having that identity - which is equal to
+            not existing for timestamps greater than t[now].
+            """
+            return self._remove_items_at(None, source_field_name, target_field_name, *objs)
+
+        def _remove_items_at(self, timestamp, source_field_name, target_field_name, *objs):
+            if objs:
+                if timestamp is None:
+                    timestamp = get_utc_now()
+                old_ids = set()
+                for obj in objs:
+                    if isinstance(obj, self.model):
+                        if hasattr(self, 'target_field'):
+                            fk_val = self.target_field.get_foreign_related_value(obj)[0]
+                        else:
+                            raise TypeError("We couldn't find the value of the foreign key, this might be due to the "
+                                            "use of an unsupported version of Django")
+                        old_ids.add(fk_val)
+                    else:
+                        old_ids.add(obj)
+                db = router.db_for_write(self.through, instance=self.instance)
+                qs = self.through._default_manager.using(db).filter(**{
+                    source_field_name: self.instance.id,
+                    '%s__in' % target_field_name: old_ids
+                }).as_of(timestamp)
+                for relation in qs:
+                    relation._delete_at(timestamp)
+
+        if 'add' in dir(many_related_manager_klass):
+            def add(self, *objs):
+                if not self.instance.is_current:
+                    raise SuspiciousOperation(
+                        "Adding many-to-many related objects is only possible on the current version")
+
+                # The ManyRelatedManager.add() method uses the through model's default manager to get
+                # a queryset when looking at which objects already exist in the database.
+                # In order to restrict the query to the current versions when that is done,
+                # we temporarily replace the queryset's using method so that the version validity
+                # condition can be specified.
+                klass = self.through._default_manager.get_queryset().__class__
+                __using_backup = klass.using
+
+                def using_replacement(self, *args, **kwargs):
+                    qs = __using_backup(self, *args, **kwargs)
+                    return qs.as_of(None)
+
+                klass.using = using_replacement
+                super(VersionedManyRelatedManager, self).add(*objs)
+                klass.using = __using_backup
+
+            def add_at(self, timestamp, *objs):
+                """
+                This function adds an object at a certain point in time (timestamp)
+                """
+                # First off, define the new constructor
+                def _through_init(self, *args, **kwargs):
+                    super(self.__class__, self).__init__(*args, **kwargs)
+                    self.version_birth_date = timestamp
+                    self.version_start_date = timestamp
+
+                # Through-classes have an empty constructor, so it can easily be overwritten when needed;
+                # This is not the default case, so the overwrite only takes place when we "modify the past"
+                self.through.__init_backup__ = self.through.__init__
+                self.through.__init__ = _through_init
+
+                # Do the add operation
+                self.add(*objs)
+
+                # Remove the constructor again (by replacing it with the original empty constructor)
+                self.through.__init__ = self.through.__init_backup__
+                del self.through.__init_backup__
+
+            add_at.alters_data = True
+
+        if 'remove' in dir(many_related_manager_klass):
+            def remove_at(self, timestamp, *objs):
+                """
+                Performs the act of removing specified relationships at a specified time (timestamp);
+                So, not the objects at a given time are removed, but their relationship!
+                """
+                self._remove_items_at(timestamp, self.source_field_name, self.target_field_name, *objs)
+
+                # For consistency, also handle the symmetrical case
+                if self.symmetrical:
+                    self._remove_items_at(timestamp, self.target_field_name, self.source_field_name, *objs)
+
+            remove_at.alters_data = True
+
+    return VersionedManyRelatedManager
+
+
+class VersionedReverseManyRelatedObjectsDescriptor(ReverseManyRelatedObjectsDescriptor):
+    """
+    Beside having a very long name, this class is useful when it comes to versioning the
+    ReverseManyRelatedObjectsDescriptor (huhu!!). The main part is the exposure of the
+    'related_manager_cls' property
+    """
+
+    def __get__(self, instance, owner=None):
+        """
+        Reads the property as which this object is figuring; mainly used for debugging purposes
+        :param instance: The instance on which the getter was called
+        :param owner: no idea... alternatively called 'instance_type by the superclasses
+        :return: A VersionedManyRelatedManager object
+        """
+        return super(VersionedReverseManyRelatedObjectsDescriptor, self).__get__(instance, owner)
+
+    def __set__(self, instance, value):
+        """
+        Completely overridden to avoid bulk deletion that happens when the parent method calls clear().
+
+        The parent method's logic is basically: clear all in bulk, then add the given objects in bulk.
+        Instead, we figure out which ones are being added and removed, and call add and remove for these values.
+        This lets us retain the versioning information.
+
+        Since this is a many-to-many relationship, it is assumed here that the django.db.models.deletion.Collector
+        logic, that is used in clear(), is not necessary here.  Collector collects related models, e.g. ones that should
+        also be deleted because they have a ON CASCADE DELETE relationship to the object, or, in the case of
+        "Multi-table inheritance", are parent objects.
+
+        :param instance: The instance on which the getter was called
+        :param value: iterable of items to set
+        """
+
+        if not instance.is_current:
+            raise SuspiciousOperation(
+                "Related values can only be directly set on the current version of an object")
+
+        if not self.field.rel.through._meta.auto_created:
+            opts = self.field.rel.through._meta
+            raise AttributeError(("Cannot set values on a ManyToManyField which specifies an intermediary model. "
+                                  "Use %s.%s's Manager instead.") % (opts.app_label, opts.object_name))
+
+        manager = self.__get__(instance)
+        # Below comment is from parent __set__ method.  We'll force evaluation, too:
+        # clear() can change expected output of 'value' queryset, we force evaluation
+        # of queryset before clear; ticket #19816
+        value = tuple(value)
+
+        being_removed, being_added = self.get_current_m2m_diff(instance, value)
+        timestamp = get_utc_now()
+        manager.remove_at(timestamp, *being_removed)
+        manager.add_at(timestamp, *being_added)
+
+    def get_current_m2m_diff(self, instance, new_objects):
+        """
+        :param instance: Versionable object
+        :param new_objects: objects which are about to be associated with instance
+        :return: (being_removed id list, being_added id list)
+        :rtype : tuple
+        """
+        new_ids = self.pks_from_objects(new_objects)
+        relation_manager = self.__get__(instance)
+
+        filter = Q(**{relation_manager.source_field.attname: instance.pk})
+        qs = self.through.objects.current.filter(filter)
+        target_name = relation_manager.target_field.attname
+        current_ids = set(qs.values_list(target_name, flat=True))
+
+        being_removed = current_ids - new_ids
+        being_added = new_ids - current_ids
+        return list(being_removed), list(being_added)
+
+    def pks_from_objects(self, objects):
+        """
+        Extract all the primary key strings from the given objects.  Objects may be Versionables, or bare primary keys.
+        :rtype : set
+        """
+        return {o.pk if isinstance(o, Model) else o for o in objects}
+
+    @cached_property
+    def related_manager_cls(self):
+        return create_versioned_many_related_manager(
+            self.field.rel.to._default_manager.__class__,
+            self.field.rel
+        )
+
+
+class VersionedManyRelatedObjectsDescriptor(ManyRelatedObjectsDescriptor):
+    """
+    Beside having a very long name, this class is useful when it comes to versioning the
+    ManyRelatedObjectsDescriptor (huhu!!). The main part is the exposure of the
+    'related_manager_cls' property
+    """
+
+    via_field_name = None
+
+    def __init__(self, related, via_field_name):
+        super(VersionedManyRelatedObjectsDescriptor, self).__init__(related)
+        self.via_field_name = via_field_name
+
+    def __get__(self, instance, owner=None):
+        """
+        Reads the property as which this object is figuring; mainly used for debugging purposes
+        :param instance: The instance on which the getter was called
+        :param owner: no idea... alternatively called 'instance_type by the superclasses
+        :return: A VersionedManyRelatedManager object
+        """
+        return super(VersionedManyRelatedObjectsDescriptor, self).__get__(instance, owner)
+
+    @cached_property
+    def related_manager_cls(self):
+        return create_versioned_many_related_manager(
+            self.related.model._default_manager.__class__,
+            self.related.field.rel
+        )
+
+
 class Versionable(models.Model):
     """
     This is pretty much the central point for versioning objects.
@@ -533,11 +1142,17 @@ class Versionable(models.Model):
     VERSIONABLE_FIELDS = [VERSION_IDENTIFIER_FIELD, OBJECT_IDENTIFIER_FIELD, 'version_start_date',
                           'version_end_date', 'version_birth_date']
 
-    id = models.CharField(max_length=36, primary_key=True)
-    """id stands for ID and is the primary key; sometimes also referenced as the surrogate key"""
+    if versions_settings.VERSIONS_USE_UUIDFIELD:
+        id = models.UUIDField(primary_key=True)
+        """id stands for ID and is the primary key; sometimes also referenced as the surrogate key"""
+    else:
+        id = models.CharField(max_length=36, primary_key=True)
 
-    identity = models.CharField(max_length=36)
-    """identity is used as the identifier of an object, ignoring its versions; sometimes also referenced as the natural key"""
+    if versions_settings.VERSIONS_USE_UUIDFIELD:
+        identity = models.UUIDField()
+        """identity is used as the identifier of an object, ignoring its versions; sometimes also referenced as the natural key"""
+    else:
+        identity = models.CharField(max_length=36)
 
     version_start_date = models.DateTimeField()
     """version_start_date points the moment in time, when a version was created (ie. an versionable was cloned).
@@ -564,8 +1179,23 @@ class Versionable(models.Model):
 
     def __init__(self, *args, **kwargs):
         super(Versionable, self).__init__(*args, **kwargs)
+
         # _querytime is for library-internal use.
         self._querytime = QueryTime(time=None, active=False)
+
+        # Ensure that the versionable field values are set.
+        # If there are any deferred fields, then this instance is being initialized
+        # from data in the database, and thus these values will already be set (unless
+        # the fields are deferred, in which case they should not be set here).
+        if not self.get_deferred_fields():
+            if not getattr(self, 'version_start_date', None):
+                setattr(self, 'version_start_date', get_utc_now())
+            if not getattr(self, 'version_birth_date', None):
+                setattr(self, 'version_birth_date', self.version_start_date)
+            if not getattr(self, self.VERSION_IDENTIFIER_FIELD, None):
+                setattr(self, self.VERSION_IDENTIFIER_FIELD, self.uuid())
+            if not getattr(self, self.OBJECT_IDENTIFIER_FIELD, None):
+                setattr(self, self.OBJECT_IDENTIFIER_FIELD, getattr(self, self.VERSION_IDENTIFIER_FIELD))
 
     def delete(self, using=None):
         using = using or router.db_for_write(self.__class__, instance=self)
@@ -573,7 +1203,7 @@ class Versionable(models.Model):
             "{} object can't be deleted because its {} attribute is set to None.".format(
                 self._meta.object_name, self._meta.pk.attname)
 
-        collector_class = versions_settings.get_versioned_delete_collector_class()
+        collector_class = get_versioned_delete_collector_class()
         collector = collector_class(using=using)
         collector.collect([self])
         collector.delete(get_utc_now())
@@ -631,13 +1261,22 @@ class Versionable(models.Model):
         self._querytime = QueryTime(time=time, active=True)
 
     @staticmethod
-    def uuid():
+    def uuid(uuid_value=None):
         """
-        Gets a new uuid string that is valid to use for id and identity fields.
+        Returns a uuid value that is valid to use for id and identity fields.
 
-        :return: unicode uuid string
+        :return: unicode uuid object if using UUIDFields, uuid unicode string otherwise.
         """
-        return six.u(str(uuid.uuid4()))
+        if uuid_value:
+            if not validate_uuid(uuid_value):
+                raise ValueError("uuid_value must be a valid UUID version 4 object")
+        else:
+            uuid_value = uuid.uuid4()
+
+        if versions_settings.VERSIONS_USE_UUIDFIELD:
+            return uuid_value
+        else:
+            return six.u(str(uuid_value))
 
     def _clone_at(self, timestamp):
         """
@@ -671,6 +1310,14 @@ class Versionable(models.Model):
                 raise ValueError('The clone date must be between the version start date and now.')
         else:
             forced_version_date = get_utc_now()
+
+        if self.get_deferred_fields():
+            # It would be necessary to fetch the record from the database again for this to succeed.
+            # Alternatively, perhaps it would be possible to create a copy of the object after
+            # fetching the missing fields.
+            # Doing so may be unexpected by the calling code, so raise an exception: the calling
+            # code should be adapted if necessary.
+            raise ValueError('Can not clone a model instance that has deferred fields')
 
         earlier_version = self
 
@@ -777,6 +1424,14 @@ class Versionable(models.Model):
         if self.is_current:
             raise ValueError('This is the current version, no need to restore it.')
 
+        if self.get_deferred_fields():
+            # It would be necessary to fetch the record from the database again for this to succeed.
+            # Alternatively, perhaps it would be possible to create a copy of the object after
+            # fetching the missing fields.
+            # Doing so may be unexpected by the calling code, so raise an exception: the calling
+            # code should be adapted if necessary.
+            raise ValueError('Can not restore a model instance that has deferred fields')
+
         cls = self.__class__
         now = get_utc_now()
         restored = copy.copy(self)
@@ -803,6 +1458,7 @@ class Versionable(models.Model):
             latest = cls.objects.current_version(self, check_db=True)
             if latest and latest != self:
                 latest.delete()
+                restored.version_start_date = latest.version_end_date
 
             self.save()
             restored.save()
@@ -843,34 +1499,19 @@ class Versionable(models.Model):
         self.version_end_date = None
         return self
 
-
-class VersionedManyToManyModel(object):
-    """
-    This class is used for holding signal handlers required for proper versioning
-    """
-
     @staticmethod
-    def post_init_initialize(sender, instance, **kwargs):
+    def matches_querytime(instance, querytime):
         """
-        This is the signal handler post-initializing the intermediate many-to-many model.
-        :param sender: The model class that just had an instance created.
-        :param instance: The actual instance of the model that's just been created.
-        :param kwargs: Required by Django definition
-        :return: None
+        Checks whether the given instance satisfies the given QueryTime object.
+
+        :param instance: an instance of Versionable
+        :param querytime: QueryTime value to check against
         """
-        if isinstance(instance, sender) and isinstance(instance, Versionable):
-            ident = Versionable.uuid()
-            now = get_utc_now()
-            if not hasattr(instance, 'version_start_date') or instance.version_start_date is None:
-                instance.version_start_date = now
-            if not hasattr(instance, 'version_birth_date') or instance.version_birth_date is None:
-                instance.version_birth_date = now
-            if not hasattr(instance, 'id') or not bool(instance.id):
-                instance.id = ident
-            if not hasattr(instance, 'identity') or not bool(instance.identity):
-                instance.identity = ident
+        if not querytime.active:
+            return True
 
+        if not querytime.time:
+            return instance.version_end_date is None
 
-post_init.connect(VersionedManyToManyModel.post_init_initialize)
-
-
+        return (instance.version_start_date <= querytime.time
+                and (instance.version_end_date is None or instance.version_end_date > querytime.time))

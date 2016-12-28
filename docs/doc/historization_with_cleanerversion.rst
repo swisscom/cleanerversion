@@ -3,7 +3,7 @@ Historization with CleanerVersion
 *********************************
 
 Disclaimer: This documentation as well as the CleanerVersion application code have been written to work against Django
-1.6.x, 1.7.x and 1.8.x. The documentation may not be accurate anymore when using more recent versions of Django.
+1.8.x. The documentation may not be accurate anymore when using more recent versions of Django.
 
 .. _cleanerversion-quick-starter:
 
@@ -347,7 +347,9 @@ Note that select_related only works for models containing foreign keys.  It does
 
 This is not a CleanerVersion limitation; it's just the way that Django's select_related() works.  Use
 prefetch_related() instead if you want to prefetch reverse or many-to-many relationships.  Note that
-prefetch_related() will use at least two queries to prefetch the related objects.
+prefetch_related() will use at least two queries to prefetch the related objects.  See also
+the :ref:`prefetch_related_notes`.
+
 
 Filtering using objects
 ^^^^^^^^^^^^^^^^^^^^^^^
@@ -532,6 +534,42 @@ The syntax for soft-deleting is the same as the standard Django Model deletion s
     club.members.remove(person4.id)
     club.members = []
 
+.. _prefetch_related_notes:
+
+Notes about using prefetch_related
+----------------------------------
+`prefetch_related <https://docs.djangoproject.com/en/1.8/ref/models/querysets/#prefetch-related>`_ accepts
+simple sting lookups or `Prefetch <https://docs.djangoproject.com/en/1.8/ref/models/querysets/#django.db.models.Prefetch>`_
+objects.
+
+When using ``prefetch_related`` with CleanerVersion, be aware that when using a ``Prefetch`` object **that
+specifies a queryset**, that you need to explicitly specify the ``as_of`` value, or use ``current``.
+A ``Prefetch`` queryset will not be automatically time-restricted based on the base queryset.
+
+For example, assuming you want everything at the time ``end_of_last_month``, do this::
+
+    disciplines_prefetch = Prefetch(
+        'sportsclubs__discipline_set',
+        queryset=Discipline.objects.as_of(end_of_last_month).filter('name__startswith'='B'))
+    people_last_month = Person.objects.as_of(end_of_last_month).prefetch_related(disciplines_prefetch)
+
+On the other hand, the following ``Prefetch``, without an ``as_of`` in the queryset, would result in all
+matching ``Discipline`` objects being returned, regardless whether they existed at ``end_of_last_month``
+or not::
+
+    # Don't do this, the Prefetch queryset is missing an as_of():
+    disciplines_prefetch = Prefetch(
+        'sportsclubs__discipline_set',
+        queryset=Discipline.objects.filter('name__startswith'='B'))
+    people_last_month = Person.objects.as_of(end_of_last_month).prefetch_related(disciplines_prefetch)
+
+If a ``Prefetch`` without an explicit queryset is used, or a simple string lookup, the generated queryset will
+be appropriately time-restricted.  The following statements will propagate the base queries'
+``as_of`` value to the generated related-objects queryset::
+
+    people1 = Person.objects.as_of(end_of_last_month).prefetch_related(Prefetch('sportsclubs__discipline_set'))
+    people2 = Person.objects.as_of(end_of_last_month).prefetch_related('sportsclubs__discipline_set')
+
 Navigating between different versions of an object
 ==================================================
 
@@ -667,6 +705,23 @@ Code::
     new_team_pk = Team.objects.current.get(name='Black Stripes').pk
     tiger = tiger_v4.restore(team_id=new_team_pk, age=33)
 
+Deferred fields
+===============
+It is not possible to clone or restore a version that has been fetched from the database without all
+of it's fields, for example using one of these three equivalent statements::
+
+    club = Club.objects.current.defer(
+        'phone', 'identity, 'version_start_date', 'version_end_date', 'version_birth_date'
+    ).first()
+    club = Club.objects.current.only('name').first()
+    club = Club.objects.raw("""
+        SELECT id, name FROM {} WHERE version_end_date IS NULL
+    """.format(Club._meta.db_table)[0]
+
+Trying to do so will raise a ValueError.  Any versioned object that needs to be cloned or restored
+must be fetched from the database without using ``defer()`` or ``only()`` (or ``raw()`` with only
+some of the model's fields).
+
 Unique Indexes
 ==============
 To have unique indexes with versioned models takes a bit of care. The issue here is that multiple versions having the same
@@ -707,10 +762,10 @@ will need to be ready to handle that.
 Postgresql specific
 ===================
 
-Django creates `extra indexes <https://docs.djangoproject.com/en/1.7/ref/databases/#indexes-for-varchar-and-text-columns>`_
-for CharFields that are used for like queries (e.g. WHERE foo like 'fish%'). Since Django 1.6 and 1.7 do not support
-native database UUID fields, the UUID fields that are used for the id and identity columns of Versionable models have these extra
-indexes created.  In fact, these fields will never be compared using the like operator.  Leaving these indexes would create a
+Django creates `extra indexes <https://docs.djangoproject.com/en/1.8/ref/databases/#indexes-for-varchar-and-text-columns>`_
+for CharFields that are used for like queries (e.g. WHERE foo like 'fish%'). Since Django 1.6 (the version CleanerVersion originally
+targeted) did not have native database UUID fields, the UUID fields that are used for the id and identity columns of Versionable models
+have these extra indexes created.  In fact, these fields will never be compared using the like operator.  Leaving these indexes would create a
 performance penalty for inserts and updates, especially for larger tables.  ``versions.util.postgresql`` has a function
 ``remove_uuid_id_like_indexes`` that can be used to remove these extra indexes.
 
@@ -740,9 +795,6 @@ at the same time, see:
 
 Note that this example is for Django >= 1.7; it makes use of the
 `application registry <https://docs.djangoproject.com/en/stable/ref/applications/>`_ that was introduced in Django 1.7.
-
-For Django 1.6, it is possible to do something similar.  The functions in ``versions.util.postgresql`` should be able to be used
-unchanged for Django 1.6.
 
 
 Integrating CleanerVersion versioned models with non-versioned models
@@ -775,6 +827,34 @@ end date, and the version start date show in the change view. These fields are `
 
 Out of the box, VersionedAdmin allows for filtering the change view by the ``as_of`` queryset filter, and whether the
 object is current.
+
+Upgrade notes
+=============
+CleanerVersion 1.6.0 / Django 1.8.3
+-----------------------------------
+Starting with CleanerVersion 1.6.0, Django's ``UUIDField`` will be used for the ``id``, ``identity``,
+and ``VersionedForeignKey`` columns if the Django version is 1.8.3 or greater.
+
+If you are upgrading from lower versions of CleanerVersion or Django, you have two choices:
+
+1. Add a setting to your project so that CleanerVersion will continue to use ``CharField`` for ``Versionable``'s
+   UUID fields. Add this to your project's settings::
+
+       VERSIONS_USE_UUIDFIELD = False
+
+This value defaults to ``True`` if not explicitly set when using Django >= 1.8.3.
+
+2. Convert all of the relevant database fields to the type and size that Django uses for UUID fields for the
+   database that you are using.  This may be possible using Django's migrations, or could be done manually by
+   altering the column type as necessary for your database type for all the  ``id``, ``identity``, and
+   foreign key columns of your ``Versionable`` models (don't forget the auto-generated many-to-many tables).
+   This is not a trivial undertaking; it will involve for example dropping and recreating constraints.
+   An example of column altering syntax for PostgreSQL::
+
+       ALTER TABLE blog_author ALTER COLUMN id type uuid USING id:uuid;
+       ALTER TABLE blog_author ALTER COLUMN identity type uuid USING identity:uuid;
+
+You must choose one or the other solution; not doing so will result in your application no longer working.
 
 Known Issues
 ============

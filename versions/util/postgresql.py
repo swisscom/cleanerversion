@@ -146,11 +146,12 @@ def create_current_version_unique_identity_indexes(app_name, database=None):
     connection = database_connection(database)
     with connection.cursor() as cursor:
         for model in versionable_models(app_name):
-            table_name = model._meta.db_table
-            index_name = '%s_%s_identity_v_uniq' % (app_name, table_name)
-            if not index_exists(cursor, index_name):
-                cursor.execute("CREATE UNIQUE INDEX %s ON %s(%s) WHERE version_end_date IS NULL"
-                               % (index_name, table_name, 'identity'))
-                indexes_created += 1
+            if getattr(model._meta, 'managed', True):
+                table_name = model._meta.db_table
+                index_name = '%s_%s_identity_v_uniq' % (app_name, table_name)
+                if not index_exists(cursor, index_name):
+                    cursor.execute("CREATE UNIQUE INDEX %s ON %s(%s) WHERE version_end_date IS NULL"
+                                   % (index_name, table_name, 'identity'))
+                    indexes_created += 1
 
     return indexes_created

@@ -4,6 +4,6 @@ Copyright 2014 Swisscom, Sophia Engineering
 This software contains code derived from DirtyVersion available at
 https://github.com/cordmata/dirtyversion
 
-This software was tested on Django 1.6 & 1.7 (https://www.djangoproject.com/)
+This software was tested on Django 1.8 (https://www.djangoproject.com/)
 
-This software is written in Python 2.7 (https://www.python.org/)
+This software is written for Python 2.7 and Python 3.4 (https://www.python.org/)

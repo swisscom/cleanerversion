@@ -22,7 +22,7 @@ import uuid
 from django import get_version
 from django.core.exceptions import SuspiciousOperation, ObjectDoesNotExist, ValidationError
 from django.db import connection, IntegrityError, transaction
-from django.db.models import Q, Count, Sum
+from django.db.models import Q, Count, Prefetch, Sum
 from django.db.models.deletion import ProtectedError
 from django.test import TestCase
 from django.utils.timezone import utc
@@ -1986,6 +1986,7 @@ class ReverseForeignKeyDirectAssignmentTests(TestCase):
         city = City.objects.as_of(self.t3).filter(identity=self.c10.identity).first()
         self.assertEqual(0, city.team_set.all().count())
 
+
 class PrefetchingTests(TestCase):
     def setUp(self):
         self.city1 = City.objects.create(name='Chicago')
@@ -2130,9 +2131,12 @@ class PrefetchingTests(TestCase):
             self.assertEqual(self.city1, team.city)
 
     def test_prefetch_related_via_many_to_many(self):
+        # award1 - award10
         awards = [Award.objects.create(name='award' + str(i)) for i in range(1, 11)]
+        # city0 - city2
         cities = [City.objects.create(name='city-' + str(i)) for i in range(3)]
         teams = []
+        # team-0-0 with city0 - team-2-1 with city1
         for i in range(3):
             for j in range(2):
                 teams.append(Team.objects.create(
@@ -2148,6 +2152,12 @@ class PrefetchingTests(TestCase):
 
         t2 = get_utc_now()
 
+        # players is player-0-0 with team-0-0 through player-5-5 with team-2-1
+        # players with awards:
+        # player-[012345]-1, [012345]-3, [012345]-5,
+        # the -1s have awards: 1,2
+        # the -3s have awards: 3,4
+        # the -5s have awards: 5,6
         with self.assertNumQueries(6):
             players_t2 = list(
                 Player.objects.as_of(t2).prefetch_related('team', 'awards').filter(
@@ -2187,6 +2197,175 @@ class PrefetchingTests(TestCase):
                 old = len(award_players[i].awards.all())
                 new = len(updated_award_players[i].awards.all())
                 self.assertTrue(new == old - 1)
+
+
+class PrefetchingHistoricTests(TestCase):
+    def setUp(self):
+        self.c1 = City.objects.create(name='city.v1')
+        self.t1 = Team.objects.create(name='team1.v1', city=self.c1)
+        self.t2 = Team.objects.create(name='team2.v1', city=self.c1)
+        self.p1 = Player.objects.create(name='pl1.v1', team=self.t1)
+        self.p2 = Player.objects.create(name='pl2.v1', team=self.t1)
+        self.time1 = get_utc_now()
+        sleep(0.001)
+
+    def modify_objects(self):
+        # Clone the city (which is referenced by a foreign key in the team object).
+        self.c1a = self.c1.clone()
+        self.c1a.name = 'city.v2'
+        self.c1a.save()
+        self.t1a = self.t1.clone()
+        self.t1a.name = 'team1.v2'
+        self.t1a.save()
+        self.p1a = self.p1.clone()
+        self.p1a.name = 'pl1.v2'
+        self.p1a.save()
+
+    def test_reverse_fk_prefetch_queryset_with_historic_versions(self):
+        """
+        prefetch_related with Prefetch objects that specify querysets.
+        """
+        historic_cities_qs = City.objects.as_of(self.time1).filter(name='city.v1').prefetch_related(
+            Prefetch(
+                'team_set',
+                queryset=Team.objects.as_of(self.time1),
+                to_attr='prefetched_teams'
+            ),
+            Prefetch(
+                'prefetched_teams__player_set',
+                queryset=Player.objects.as_of(self.time1),
+                to_attr='prefetched_players'
+            )
+        )
+        with self.assertNumQueries(3):
+            historic_cities = list(historic_cities_qs)
+            self.assertEquals(1, len(historic_cities))
+            historic_city = historic_cities[0]
+            self.assertEquals(2, len(historic_city.prefetched_teams))
+            self.assertSetEqual({'team1.v1', 'team2.v1'}, {t.name for t in historic_city.prefetched_teams})
+            team = [t for t in historic_city.prefetched_teams if t.name == 'team1.v1'][0]
+            self.assertSetEqual({'pl1.v1', 'pl2.v1'}, {p.name for p in team.prefetched_players})
+
+        # For the 'current' case:
+        current_cities_qs = City.objects.current.filter(name='city.v1').prefetch_related(
+            Prefetch(
+                'team_set',
+                queryset=Team.objects.current,
+                to_attr='prefetched_teams'
+            ),
+            Prefetch(
+                'prefetched_teams__player_set',
+                queryset=Player.objects.current,
+                to_attr='prefetched_players'
+            )
+        )
+        with self.assertNumQueries(3):
+            current_cities = list(current_cities_qs)
+            self.assertEquals(1, len(current_cities))
+            current_city = current_cities[0]
+            self.assertEquals(2, len(current_city.prefetched_teams))
+            self.assertSetEqual({'team1.v1', 'team2.v1'}, {t.name for t in current_city.prefetched_teams})
+            team = [t for t in current_city.prefetched_teams if t.name == 'team1.v1'][0]
+            self.assertSetEqual({'pl1.v1', 'pl2.v1'}, {p.name for p in team.prefetched_players})
+
+        self.modify_objects()
+
+        historic_cities_qs = City.objects.as_of(self.time1).filter(name='city.v1').prefetch_related(
+            Prefetch(
+                'team_set',
+                queryset=Team.objects.as_of(self.time1),
+                to_attr='prefetched_teams'
+            ),
+            Prefetch(
+                'prefetched_teams__player_set',
+                queryset=Player.objects.as_of(self.time1),
+                to_attr='prefetched_players'
+            )
+        )
+        with self.assertNumQueries(3):
+            historic_cities = list(historic_cities_qs)
+            self.assertEquals(1, len(historic_cities))
+            historic_city = historic_cities[0]
+            self.assertEquals(2, len(historic_city.prefetched_teams))
+            self.assertSetEqual({'team1.v1', 'team2.v1'}, {t.name for t in historic_city.prefetched_teams})
+            team = [t for t in historic_city.prefetched_teams if t.name == 'team1.v1'][0]
+            self.assertSetEqual({'pl1.v1', 'pl2.v1'}, {p.name for p in team.prefetched_players})
+
+        # For the 'current' case:
+        current_cities_qs = City.objects.current.filter(name='city.v2').prefetch_related(
+            Prefetch(
+                'team_set',
+                queryset=Team.objects.current,
+                to_attr='prefetched_teams'
+            ),
+            Prefetch(
+                'prefetched_teams__player_set',
+                queryset=Player.objects.current,
+                to_attr='prefetched_players'
+            ),
+        )
+        with self.assertNumQueries(3):
+            current_cities = list(current_cities_qs)
+            self.assertEquals(1, len(current_cities))
+            current_city = current_cities[0]
+            self.assertEquals(2, len(current_city.prefetched_teams))
+            self.assertSetEqual({'team1.v2', 'team2.v1'}, {t.name for t in current_city.prefetched_teams})
+            team = [t for t in current_city.prefetched_teams if t.name == 'team1.v2'][0]
+            self.assertSetEqual({'pl1.v2', 'pl2.v1'}, {p.name for p in team.prefetched_players})
+
+    def test_reverse_fk_simple_prefetch_with_historic_versions(self):
+        """
+        prefetch_related with simple lookup.
+        """
+        historic_cities_qs = City.objects.as_of(self.time1).filter(name='city.v1').prefetch_related(
+            'team_set', 'team_set__player_set')
+        with self.assertNumQueries(3):
+            historic_cities = list(historic_cities_qs)
+            self.assertEquals(1, len(historic_cities))
+            historic_city = historic_cities[0]
+            self.assertEquals(2, len(historic_city.team_set.all()))
+            self.assertSetEqual({'team1.v1', 'team2.v1'}, {t.name for t in historic_city.team_set.all()})
+            team = [t for t in historic_city.team_set.all() if t.name == 'team1.v1'][0]
+            self.assertSetEqual({'pl1.v1', 'pl2.v1'}, {p.name for p in team.player_set.all()})
+
+        # For the 'current' case:
+        current_cities_qs = City.objects.current.filter(name='city.v1').prefetch_related(
+            'team_set', 'team_set__player_set')
+        with self.assertNumQueries(3):
+            current_cities = list(current_cities_qs)
+            self.assertEquals(1, len(current_cities))
+            current_city = current_cities[0]
+            self.assertEquals(2, len(current_city.team_set.all()))
+            self.assertSetEqual({'team1.v1', 'team2.v1'}, {t.name for t in current_city.team_set.all()})
+            team = [t for t in current_city.team_set.all() if t.name == 'team1.v1'][0]
+            self.assertSetEqual({'pl1.v1', 'pl2.v1'}, {p.name for p in team.player_set.all()})
+
+        # Now, we'll clone the city (which is referenced by a foreign key in the team object).
+        # The queries above, when repeated, should work the same as before.
+        self.modify_objects()
+
+        historic_cities_qs = City.objects.as_of(self.time1).filter(name='city.v1').prefetch_related(
+            'team_set', 'team_set__player_set')
+        with self.assertNumQueries(3):
+            historic_cities = list(historic_cities_qs)
+            self.assertEquals(1, len(historic_cities))
+            historic_city = historic_cities[0]
+            self.assertEquals(2, len(historic_city.team_set.all()))
+            self.assertSetEqual({'team1.v1', 'team2.v1'}, {t.name for t in historic_city.team_set.all()})
+            team = [t for t in historic_city.team_set.all() if t.name == 'team1.v1'][0]
+            self.assertSetEqual({'pl1.v1', 'pl2.v1'}, {p.name for p in team.player_set.all()})
+
+        # For the 'current' case:
+        current_cities_qs = City.objects.current.filter(name='city.v2').prefetch_related(
+            'team_set', 'team_set__player_set')
+        with self.assertNumQueries(3):
+            current_cities = list(current_cities_qs)
+            self.assertEquals(1, len(current_cities))
+            current_city = current_cities[0]
+            self.assertEquals(2, len(current_city.team_set.all()))
+            self.assertSetEqual({'team1.v2', 'team2.v1'}, {t.name for t in current_city.team_set.all()})
+            team = [t for t in current_city.team_set.all() if t.name == 'team1.v2'][0]
+            self.assertSetEqual({'pl1.v2', 'pl2.v1'}, {p.name for p in team.player_set.all()})
 
 
 class IntegrationNonVersionableModelsTests(TestCase):
@@ -2306,16 +2485,20 @@ class FilterOnForeignKeyRelationTest(TestCase):
 class SpecifiedUUIDTest(TestCase):
 
     @staticmethod
-    def uuid4():
-        return six.text_type(str(uuid.uuid4()))
+    def uuid4(uuid_value=None):
+        if not uuid_value:
+            return uuid.uuid4()
+        if isinstance(uuid_value, uuid.UUID):
+            return uuid_value
+        return uuid.UUID(uuid_value)
 
     def test_create_with_uuid(self):
         p_id = self.uuid4()
         p = Person.objects.create(id=p_id, name="Alice")
-        self.assertEqual(p_id, p.id)
-        self.assertEqual(p_id, p.identity)
+        self.assertEqual(str(p_id), str(p.id))
+        self.assertEqual(str(p_id), str(p.identity))
 
-        p_id = six.text_type(str(uuid.uuid5(uuid.NAMESPACE_OID, 'bar')))
+        p_id = uuid.uuid5(uuid.NAMESPACE_OID, 'bar')
         with self.assertRaises(ValueError):
             Person.objects.create(id=p_id, name="Alexis")
 
@@ -2331,12 +2514,14 @@ class SpecifiedUUIDTest(TestCase):
         if connection.vendor == 'postgresql' and get_version() >= '1.7':
             with self.assertRaises(IntegrityError):
                 with transaction.atomic():
-                    Person.objects.create(forced_identity=p.identity, name="Alexis")
+                    ident = self.uuid4(p.identity)
+                    Person.objects.create(forced_identity=ident, name="Alexis")
 
         p.delete()
         sleep(0.1)  # The start date of p2 does not necessarily have to equal the end date of p.
 
-        p2 = Person.objects.create(forced_identity=p.identity, name="Alexis")
+        ident = self.uuid4(p.identity)
+        p2 = Person.objects.create(forced_identity=ident, name="Alexis")
         p2.version_birth_date = p.version_birth_date
         p2.save()
         self.assertEqual(p.identity, p2.identity)
@@ -2409,6 +2594,9 @@ class VersionRestoreTest(TestCase):
         previous = Player.objects.previous_version(restored)
         self.assertSetEqual(set(previous.awards.all()), set(self.awards.values()))
         self.assertEqual(self.forty_niners, previous.team)
+
+        # There should be no overlap of version periods.
+        self.assertEquals(previous.version_end_date, restored.version_start_date)
 
     def test_restore_with_required_foreignkey(self):
         team = Team.objects.create(name="Flying Pigs")
@@ -2546,3 +2734,86 @@ class DetachTest(TestCase):
         t = Team.objects.current.get(pk=t_pk)
         self.assertEqual({p, p2}, set(t.player_set.all()))
         self.assertEqual([], list(t2.player_set.all()))
+
+
+class DeferredFieldsTest(TestCase):
+
+    def setUp(self):
+        self.c1 = City.objects.create(name="Porto")
+        self.team1 = Team.objects.create(name="Tigers", city=self.c1)
+
+    def test_simple_defer(self):
+        limited = City.objects.current.only('name').get(pk=self.c1.pk)
+        deferred_fields = set(Versionable.VERSIONABLE_FIELDS)
+        deferred_fields.remove('id')
+        self.assertSetEqual(deferred_fields, set(limited.get_deferred_fields()))
+        for field_name in deferred_fields:
+            self.assertNotIn(field_name, limited.__dict__ )
+
+        deferred_fields = ['version_start_date', 'version_end_date']
+        deferred = City.objects.current.defer(*deferred_fields).get(pk=self.c1.pk)
+        self.assertSetEqual(set(deferred_fields), set(deferred.get_deferred_fields()))
+        for field_name in deferred_fields:
+            self.assertNotIn(field_name, deferred.__dict__ )
+
+        # Accessing deferred fields triggers queries:
+        with self.assertNumQueries(2):
+            self.assertEquals(self.c1.version_start_date, deferred.version_start_date)
+            self.assertEquals(self.c1.version_end_date, deferred.version_end_date)
+        # If already fetched, no query is made:
+        with self.assertNumQueries(0):
+            self.assertEquals(self.c1.version_start_date, deferred.version_start_date)
+
+    def test_deferred_foreign_key_field(self):
+
+        team_full = Team.objects.current.get(pk=self.team1.pk)
+        self.assertIn('city_id', team_full.__dict__ )
+        team_light = Team.objects.current.only('name').get(pk=self.team1.pk)
+        self.assertNotIn('city_id', team_light.__dict__ )
+        with self.assertNumQueries(2):
+            # One query to get city_id, and one query to get the related City object.
+            self.assertEquals(self.c1.name, team_light.city.name)
+
+    def test_reverse_foreign_key_access(self):
+        city = City.objects.current.only('name').get(identity=self.c1.identity)
+        with self.assertNumQueries(2):
+            # One query to get the identity, one query to get the related objects.
+            self.assertSetEqual({self.team1.pk}, {o.pk for o in city.team_set.all()})
+
+    def test_many_to_many_access(self):
+        player1 = Player.objects.create(name='Raaaaaow', team=self.team1)
+        player2 = Player.objects.create(name='Pssshh', team=self.team1)
+        award1 = Award.objects.create(name='Fastest paws')
+        award1.players.add(player2)
+        award2 = Award.objects.create(name='Frighteningly fast')
+        award2.players.add(player1, player2)
+
+        player2_light = Player.objects.current.only('name').get(identity=player2.identity)
+        with self.assertNumQueries(1):
+            # Many-to-many fields use the id field, which is always fetched, so only one query
+            # should be made to get the related objects.
+            self.assertSetEqual({award1.pk, award2.pk}, {o.pk for o in player2_light.awards.all()})
+
+        # And from the other direction:
+        award2_light = Award.objects.current.only('name').get(identity=award2.identity)
+        with self.assertNumQueries(1):
+            self.assertSetEqual({player1.pk, player2.pk}, {o.pk for o in award2_light.players.all()})
+
+    def test_clone_of_deferred_object(self):
+        c1_v1_partial = City.objects.current.defer('name').get(pk=self.c1.pk)
+        self.assertRaisesMessage(
+            ValueError,
+            'Can not clone a model instance that has deferred fields',
+            c1_v1_partial.clone
+        )
+
+    def test_restore_of_deferred_object(self):
+        t1 = get_utc_now()
+        sleep(0.001)
+        c1_v2 = self.c1.clone()
+        c1_v1 = City.objects.as_of(t1).defer('name').get(identity=c1_v2.identity)
+        self.assertRaisesMessage(
+            ValueError,
+            'Can not restore a model instance that has deferred fields',
+            c1_v1.restore
+        )
