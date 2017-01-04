@@ -10,7 +10,6 @@ from versions.descriptors import (VersionedForwardManyToOneDescriptor,
                                   VersionedManyToManyDescriptor)
 from versions.models import Versionable
 
-
 class VersionedForeignKey(ForeignKey):
     """
     We need to replace the standard ForeignKey declaration in order to be able to introduce

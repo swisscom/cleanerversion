@@ -18,7 +18,6 @@ class VersionsSettings(object):
 
     defaults = {
         'VERSIONED_DELETE_COLLECTOR': 'versions.deletion.VersionedCollector',
-        'VERSIONS_USE_UUIDFIELD': VERSION[:3] >= (1, 8, 3),
     }
 
     def __getattr__(self, name):

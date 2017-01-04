@@ -25,14 +25,11 @@ from django.db.models.fields.related import ForeignKey
 from django.db.models.query import QuerySet, ModelIterable
 from django.db.models.sql.datastructures import Join
 from django.db.models.sql.query import Query
-from django.db.models.sql.where import ExtraWhere, WhereNode
-from django.utils import six
+from django.db.models.sql.where import WhereNode
 from django.utils.timezone import utc
 
-from versions.descriptors import VersionedForwardManyToOneDescriptor, VersionedReverseManyToOneDescriptor
 from versions.exceptions import DeletionOfNonCurrentVersionError
 from versions.settings import get_versioned_delete_collector_class
-from versions.settings import settings as versions_settings
 from versions.util import get_utc_now
 
 
@@ -271,6 +268,7 @@ class VersionedWhereNode(WhereNode):
         :return: A tuple consisting of (sql_string, result_params)
         """
         # self.children is an array of VersionedExtraWhere-objects
+        from versions.fields import VersionedExtraWhere
         for child in self.children:
             if isinstance(child, VersionedExtraWhere) and not child.params:
                 _query = qn.query
@@ -302,60 +300,6 @@ class VersionedWhereNode(WhereNode):
                     or (lhs == child.related_alias and table == child.alias):
                 child.set_joined_alias(table)
                 break
-
-
-class VersionedExtraWhere(ExtraWhere):
-    """
-    A specific implementation of ExtraWhere;
-    Before as_sql can be called on an object, ensure that calls to
-    - set_as_of and
-    - set_joined_alias
-    have been done
-    """
-
-    def __init__(self, historic_sql, current_sql, alias, remote_alias):
-        super(VersionedExtraWhere, self).__init__(sqls=[], params=[])
-        self.historic_sql = historic_sql
-        self.current_sql = current_sql
-        self.alias = alias
-        self.related_alias = remote_alias
-        self._as_of_time_set = False
-        self.as_of_time = None
-        self._joined_alias = None
-
-    def set_as_of(self, as_of_time):
-        self.as_of_time = as_of_time
-        self._as_of_time_set = True
-
-    def set_joined_alias(self, joined_alias):
-        """
-        Takes the alias that is being joined to the query and applies the query
-        time constraint to its table
-
-        :param str joined_alias: The table name of the alias
-        """
-        self._joined_alias = joined_alias
-
-    def as_sql(self, qn=None, connection=None):
-        sql = ""
-        params = []
-
-        # Fail fast for inacceptable cases
-        if self._as_of_time_set and not self._joined_alias:
-            raise ValueError("joined_alias is not set, but as_of is; this is a conflict!")
-
-        # Set the SQL string in dependency of whether as_of_time was set or not
-        if self._as_of_time_set:
-            if self.as_of_time:
-                sql = self.historic_sql
-                params = [self.as_of_time] * 2
-                # 2 is the number of occurences of the timestamp in an as_of-filter expression
-            else:
-                # If as_of_time was set to None, we're dealing with a query for "current" values
-                sql = self.current_sql
-        else:
-            # No as_of_time has been set; Perhaps, as_of was not part of the query -> That's OK
-            pass
 
 
 class VersionedQuery(Query):
@@ -570,72 +514,6 @@ class VersionedQuerySet(QuerySet):
     delete.queryset_only = True
 
 
-class VersionedForeignKey(ForeignKey):
-    """
-    We need to replace the standard ForeignKey declaration in order to be able to introduce
-    the VersionedReverseSingleRelatedObjectDescriptor, which allows to go back in time...
-    We also want to allow keeping track of any as_of time so that joins can be restricted
-    based on that.
-    """
-
-    def __init__(self, *args, **kwargs):
-        super(VersionedForeignKey, self).__init__(*args, **kwargs)
-
-    def contribute_to_class(self, cls, name, virtual_only=False):
-        super(VersionedForeignKey, self).contribute_to_class(cls, name, virtual_only)
-        setattr(cls, self.name, VersionedForwardManyToOneDescriptor(self))
-
-    def contribute_to_related_class(self, cls, related):
-        """
-        Override ForeignKey's methods, and replace the descriptor, if set by the parent's methods
-        """
-        # Internal FK's - i.e., those with a related name ending with '+' -
-        # and swapped models don't get a related descriptor.
-        super(VersionedForeignKey, self).contribute_to_related_class(cls, related)
-        accessor_name = related.get_accessor_name()
-        if hasattr(cls, accessor_name):
-            setattr(cls, accessor_name, VersionedReverseManyToOneDescriptor(related))
-
-    def get_extra_restriction(self, where_class, alias, remote_alias):
-        """
-        Overrides ForeignObject's get_extra_restriction function that returns an SQL statement which is appended to a
-        JOIN's conditional filtering part
-
-        :return: SQL conditional statement
-        :rtype: WhereNode
-        """
-        historic_sql = '''{alias}.version_start_date <= %s
-                 AND ({alias}.version_end_date > %s OR {alias}.version_end_date is NULL )'''
-        current_sql = '''{alias}.version_end_date is NULL'''
-        # How 'bout creating an ExtraWhere here, without params
-        return where_class([VersionedExtraWhere(historic_sql=historic_sql, current_sql=current_sql, alias=alias,
-                                                remote_alias=remote_alias)])
-
-    def get_joining_columns(self, reverse_join=False):
-        """
-        Get and return joining columns defined by this foreign key relationship
-
-        :return: A tuple containing the column names of the tables to be joined (<local_col_name>, <remote_col_name>)
-        :rtype: tuple
-        """
-        source = self.reverse_related_fields if reverse_join else self.related_fields
-        joining_columns = tuple()
-        for lhs_field, rhs_field in source:
-            lhs_col_name = lhs_field.column
-            rhs_col_name = rhs_field.column
-            # Test whether
-            # - self is the current ForeignKey relationship
-            # - self was not auto_created (e.g. is not part of a M2M relationship)
-            if self is lhs_field and not self.auto_created:
-                if rhs_col_name == Versionable.VERSION_IDENTIFIER_FIELD:
-                    rhs_col_name = Versionable.OBJECT_IDENTIFIER_FIELD
-            elif self is rhs_field and not self.auto_created:
-                if lhs_col_name == Versionable.VERSION_IDENTIFIER_FIELD:
-                    lhs_col_name = Versionable.OBJECT_IDENTIFIER_FIELD
-            joining_columns = joining_columns + ((lhs_col_name, rhs_col_name),)
-        return joining_columns
-
-
 class Versionable(models.Model):
     """
     This is pretty much the central point for versioning objects.
@@ -645,17 +523,11 @@ class Versionable(models.Model):
     VERSIONABLE_FIELDS = [VERSION_IDENTIFIER_FIELD, OBJECT_IDENTIFIER_FIELD, 'version_start_date',
                           'version_end_date', 'version_birth_date']
 
-    if versions_settings.VERSIONS_USE_UUIDFIELD:
-        id = models.UUIDField(primary_key=True)
-        """id stands for ID and is the primary key; sometimes also referenced as the surrogate key"""
-    else:
-        id = models.CharField(max_length=36, primary_key=True)
+    id = models.UUIDField(primary_key=True)
+    """id stands for ID and is the primary key; sometimes also referenced as the surrogate key"""
 
-    if versions_settings.VERSIONS_USE_UUIDFIELD:
-        identity = models.UUIDField()
-        """identity is used as the identifier of an object, ignoring its versions; sometimes also referenced as the natural key"""
-    else:
-        identity = models.CharField(max_length=36)
+    identity = models.UUIDField()
+    """identity is used as the identifier of an object, ignoring its versions; sometimes also referenced as the natural key"""
 
     version_start_date = models.DateTimeField()
     """version_start_date points the moment in time, when a version was created (ie. an versionable was cloned).
@@ -700,7 +572,7 @@ class Versionable(models.Model):
             if not getattr(self, self.OBJECT_IDENTIFIER_FIELD, None):
                 setattr(self, self.OBJECT_IDENTIFIER_FIELD, getattr(self, self.VERSION_IDENTIFIER_FIELD))
 
-    def delete(self, using=None):
+    def delete(self, using=None, keep_parents=False):
         using = using or router.db_for_write(self.__class__, instance=self)
         assert self._get_pk_val() is not None, \
             "{} object can't be deleted because its {} attribute is set to None.".format(
@@ -708,7 +580,7 @@ class Versionable(models.Model):
 
         collector_class = get_versioned_delete_collector_class()
         collector = collector_class(using=using)
-        collector.collect([self])
+        collector.collect([self], keep_parents=keep_parents)
         collector.delete(get_utc_now())
 
     def _delete_at(self, timestamp, using=None):
@@ -776,10 +648,7 @@ class Versionable(models.Model):
         else:
             uuid_value = uuid.uuid4()
 
-        if versions_settings.VERSIONS_USE_UUIDFIELD:
-            return uuid_value
-        else:
-            return six.u(str(uuid_value))
+        return uuid_value
 
     def _clone_at(self, timestamp):
         """
