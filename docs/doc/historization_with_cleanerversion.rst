@@ -518,6 +518,12 @@ Versioning an object in a ManyToMany relationship requires 3 steps to be done, i
   .. image:: ../images/clone_m2m_item_3.png
         :align: center
 
+The records in ManyToMany intermediary tables are versioned: they have ``version_birth_date``,
+``version_start_date`` and ``version_end_date`` columns.  The ForeignKey columns in ManyToMany
+Intermediary tables store the ``id`` of the referenced records.  Note that this is different than
+the VersionedForeignKeys in Versionable models, which store the ``identity`` of the referenced objects.
+This is transparent in normal usage, but can be important to keep in mind when you need to write a query
+that directly references the ForeignKey columns.
 
 Removing objects from a versioned M2M relationship
 --------------------------------------------------
