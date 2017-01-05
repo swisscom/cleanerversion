@@ -17,6 +17,7 @@ import datetime
 import uuid
 from collections import namedtuple
 
+import six
 from django.core.exceptions import SuspiciousOperation, ObjectDoesNotExist
 from django.db import models, router, transaction
 from django.db.models import Q
@@ -29,7 +30,7 @@ from django.db.models.sql.where import WhereNode
 from django.utils.timezone import utc
 
 from versions.exceptions import DeletionOfNonCurrentVersionError
-from versions.settings import get_versioned_delete_collector_class
+from versions.settings import get_versioned_delete_collector_class, settings as versions_settings
 from versions.util import get_utc_now
 
 
@@ -523,11 +524,18 @@ class Versionable(models.Model):
     VERSIONABLE_FIELDS = [VERSION_IDENTIFIER_FIELD, OBJECT_IDENTIFIER_FIELD, 'version_start_date',
                           'version_end_date', 'version_birth_date']
 
-    id = models.UUIDField(primary_key=True)
-    """id stands for ID and is the primary key; sometimes also referenced as the surrogate key"""
+    if versions_settings.VERSIONS_USE_UUIDFIELD:
+        id = models.UUIDField(primary_key=True)
+        """id stands for ID and is the primary key; sometimes also referenced as the surrogate key"""
+    else:
+        id = models.CharField(max_length=36, primary_key=True)
 
-    identity = models.UUIDField()
-    """identity is used as the identifier of an object, ignoring its versions; sometimes also referenced as the natural key"""
+    if versions_settings.VERSIONS_USE_UUIDFIELD:
+        identity = models.UUIDField()
+        """identity is used as the identifier of an object, ignoring its versions; sometimes also referenced as the natural key"""
+    else:
+        identity = models.CharField(max_length=36)
+        """identity is used as the identifier of an object, ignoring its versions; sometimes also referenced as the natural key"""
 
     version_start_date = models.DateTimeField()
     """version_start_date points the moment in time, when a version was created (ie. an versionable was cloned).
@@ -648,7 +656,10 @@ class Versionable(models.Model):
         else:
             uuid_value = uuid.uuid4()
 
-        return uuid_value
+        if versions_settings.VERSIONS_USE_UUIDFIELD:
+            return uuid_value
+        else:
+            return six.u(str(uuid_value))
 
     def _clone_at(self, timestamp):
         """
