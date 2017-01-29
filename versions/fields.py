@@ -1,6 +1,6 @@
-from django.apps import apps
+from django.db.models.deletion import DO_NOTHING
 from django.db.models.fields.related import ForeignKey, ManyToManyField, \
-    resolve_relation
+    resolve_relation, lazy_related_operation
 from django.db.models.sql.datastructures import Join
 from django.db.models.sql.where import ExtraWhere, WhereNode
 from django.db.models.utils import make_model_tuple
@@ -9,6 +9,7 @@ from versions.descriptors import (VersionedForwardManyToOneDescriptor,
                                   VersionedReverseManyToOneDescriptor,
                                   VersionedManyToManyDescriptor)
 from versions.models import Versionable
+
 
 class VersionedForeignKey(ForeignKey):
     """
@@ -94,6 +95,9 @@ class VersionedManyToManyField(ManyToManyField):
         # - resolving the through class if it's a string
         # - resolving string references within the through class
         if not self.remote_field.through and not cls._meta.abstract and not cls._meta.swapped:
+            # We need to anticipate some stuff, that's done only later in class contribution
+            self.set_attributes_from_name(name)
+            self.model = cls
             self.remote_field.through = VersionedManyToManyField.create_versioned_many_to_many_intermediary_model(self,
                                                                                                                   cls,
                                                                                                                   name)
@@ -123,49 +127,55 @@ class VersionedManyToManyField(ManyToManyField):
         # Let's not care too much on what flags could potentially be set on that intermediary class (e.g. managed, etc)
         # Let's play the game, as if the programmer had specified a class within his models... Here's how.
 
-        from_ = cls._meta.model_name
+        # FIXME: VersionedManyToManyModels do not get registered in the apps models.
+        # FIXME: This is usually done at django/db/models/base.py:284,
+        # invoked by create_many_to_many_intermediary_model at django.db.models.fields.related:1048
+
+        def set_managed(model, related, through):
+            through._meta.managed = model._meta.managed or related._meta.managed
+
         to_model = resolve_relation(cls, field.remote_field.model)
+
+        name = '%s_%s' % (cls._meta.object_name, field_name)
+        lazy_related_operation(set_managed, cls, to_model, name)
 
         # Force 'to' to be a string (and leave the hard work to Django)
         to = make_model_tuple(to_model)[1]
-        # if not isinstance(field.rel.to, basestring):
-        #     to_model = '%s.%s' % (field.rel.to._meta.app_label, field.rel.to._meta.object_name)
-        #     to = field.rel.to._meta.object_name.lower()
-        # else:
-        #     to = to_model.lower()
-        name = '%s_%s' % (from_, field_name)
-
+        from_ = cls._meta.model_name
         if to == from_:
             from_ = 'from_%s' % from_
             to = 'to_%s' % to
 
-        # Since Django 1.7, a migration mechanism is shipped by default with Django. This migration module loads all
-        # declared apps' models inside a __fake__ module.
-        # This means that the models can be already loaded and registered by their original module, when we
-        # reach this point of the application and therefore there is no need to load them a second time.
-        if cls.__module__ == '__fake__':
-            try:
-                # Check the apps for an already registered model
-                return apps.get_model(cls._meta.app_label, str(name))
-            except KeyError:
-                # The model has not been registered yet, so continue
-                # TODO: Do we need to handle migrations differently here for intermediary M2M models?
-                pass
-
         meta = type('Meta', (object,), {
-            # 'unique_together': (from_, to),
+            'db_table': field._get_m2m_db_table(cls._meta),
             'auto_created': cls,
-            'db_tablespace': cls._meta.db_tablespace,
             'app_label': cls._meta.app_label,
+            'db_tablespace': cls._meta.db_tablespace,
+            # 'unique_together' is not applicable as is, due to multiple versions to be allowed to exist.
+            # 'unique_together': (from_, to),
             'verbose_name': '%(from)s-%(to)s relationship' % {'from': from_, 'to': to},
             'verbose_name_plural': '%(from)s-%(to)s relationships' % {'from': from_, 'to': to},
-            'apps': cls._meta.apps,
+            'apps': field.model._meta.apps,
         })
         return type(str(name), (Versionable,), {
             'Meta': meta,
             '__module__': cls.__module__,
-            from_: VersionedForeignKey(cls, related_name='%s+' % name, auto_created=name),
-            to: VersionedForeignKey(to_model, related_name='%s+' % name, auto_created=name),
+            from_: VersionedForeignKey(
+                cls,
+                related_name='%s+' % name,
+                db_tablespace=field.db_tablespace,
+                db_constraint=field.remote_field.db_constraint,
+                auto_created=name,
+                on_delete=DO_NOTHING,
+            ),
+            to: VersionedForeignKey(
+                to_model,
+                related_name='%s+' % name,
+                db_tablespace=field.db_tablespace,
+                db_constraint=field.remote_field.db_constraint,
+                auto_created=name,
+                on_delete=DO_NOTHING,
+            ),
         })
 
 
