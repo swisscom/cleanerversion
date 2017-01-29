@@ -1,9 +1,10 @@
 from django.db.models import CharField, IntegerField, Model, ForeignKey
 from django.db.models.deletion import DO_NOTHING, PROTECT, SET, SET_NULL
+from django.db.models.fields.related import ManyToManyField
 from django.utils.encoding import python_2_unicode_compatible
 
-from versions.fields import VersionedManyToManyField, VersionedForeignKey
 from versions.models import Versionable
+from versions.fields import VersionedManyToManyField, VersionedForeignKey
 
 
 def versionable_description(obj):
@@ -266,4 +267,4 @@ class WineDrinkerHat(Model):
 # SelfReferencingManyToManyTest models
 class Person(Versionable):
     name = CharField(max_length=200)
-    children = VersionedManyToManyField('self', symmetrical=False, null=True, related_name='parents')
+    children = VersionedManyToManyField('self', symmetrical=False, related_name='parents')

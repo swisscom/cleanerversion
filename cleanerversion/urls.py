@@ -1,5 +1,6 @@
-from django.conf.urls import patterns, url
+from django.conf.urls import url
 from django.contrib import admin
 
-urlpatterns = patterns('',
-                       url(r'^admin/', admin.site.urls, ), )
+urlpatterns = [
+    url(r'^admin/', admin.site.urls, ),
+]
