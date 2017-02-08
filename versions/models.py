@@ -17,7 +17,6 @@ import datetime
 import uuid
 from collections import namedtuple
 
-import six
 from django.core.exceptions import SuspiciousOperation, ObjectDoesNotExist
 from django.db import models, router, transaction
 from django.db.models import Q
@@ -27,6 +26,7 @@ from django.db.models.query import QuerySet, ModelIterable
 from django.db.models.sql.datastructures import Join
 from django.db.models.sql.query import Query
 from django.db.models.sql.where import WhereNode
+from django.utils import six
 from django.utils.timezone import utc
 
 from versions.exceptions import DeletionOfNonCurrentVersionError
