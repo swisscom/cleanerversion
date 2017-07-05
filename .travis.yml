@@ -1,11 +1,13 @@
 language: python
-python: "2.7"
+python:
+  - "2.7"
+  - "3.6"
 
 env:
   - TOX_ENV=py27-django18-pg
   - TOX_ENV=py27-django18-sqlite
-  - TOX_ENV=py34-django18-pg
-  - TOX_ENV=py34-django18-sqlite
+  - TOX_ENV=py36-django18-pg
+  - TOX_ENV=py36-django18-sqlite
 
 # Enable PostgreSQL usage
 addons:
@@ -14,6 +16,7 @@ addons:
 # Dependencies
 install:
   - pip install tox
+  - pip install tox-travis
   - pip install coveralls
 
 # Ensure PostgreSQL-DB to be configured correctly
@@ -25,7 +28,7 @@ before_script:
 
 # Run tests
 script:
-  tox -e $TOX_ENV
+  tox
 
 # Run coveralls
 after_success:
