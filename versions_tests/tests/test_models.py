@@ -2183,6 +2183,12 @@ class PrefetchingTests(TestCase):
             name_list.append(p.name)
 
         with self.assertNumQueries(2):
+            old_award_players =  list(
+                    Player.objects.as_of(t2).prefetch_related('awards').filter(
+                        name__in=name_list).order_by('name')
+                )
+
+        with self.assertNumQueries(2):
             updated_award_players = list(
                 Player.objects.current.prefetch_related('awards').filter(
                     name__in=name_list).order_by('name')
@@ -2190,7 +2196,7 @@ class PrefetchingTests(TestCase):
 
         with self.assertNumQueries(0):
             for i in range(len(award_players)):
-                old = len(award_players[i].awards.all())
+                old = len(old_award_players[i].awards.all())
                 new = len(updated_award_players[i].awards.all())
                 self.assertTrue(new == old - 1)
 
