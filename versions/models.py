@@ -829,10 +829,10 @@ class Versionable(models.Model):
                 setattr(restored, field.name, kwargs[field.name])
             elif isinstance(field, ForeignKey):
                 # Set all non-provided ForeignKeys to None.  If required, raise an error.
-                try:
-                    setattr(restored, field.name, None)
-                except ValueError as e:
-                    raise ForeignKeyRequiresValueError(e.args[0])
+                setattr(restored, field.name, None)
+                # Need to explicitely raise error since Django 1.10 (https://docs.djangoproject.com/en/1.10/releases/1.10/#removed-null-assignment-check-for-non-null-foreign-key-fields)
+                if not field.null:
+                    raise ForeignKeyRequiresValueError("Field '%s' is not nullable" % field.name)
 
         self.id = self.uuid()
 

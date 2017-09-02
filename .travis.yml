@@ -2,10 +2,10 @@ language: python
 python: "2.7"
 
 env:
-  - TOX_ENV=py27-django19-pg
-  - TOX_ENV=py27-django19-sqlite
-  - TOX_ENV=py35-django19-pg
-  - TOX_ENV=py35-django19-sqlite
+  - TOX_ENV=py27-django110-pg
+  - TOX_ENV=py27-django110-sqlite
+  - TOX_ENV=py36-django110-pg
+  - TOX_ENV=py36-django110-sqlite
 
 # Enable PostgreSQL usage
 addons:

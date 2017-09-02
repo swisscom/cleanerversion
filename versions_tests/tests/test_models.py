@@ -53,6 +53,9 @@ def set_up_one_object_with_3_versions():
 
     sleep(0.1)
     t1 = get_utc_now()
+    # 1ms sleeps are required, since sqlite has a 1ms precision in its datetime stamps
+    # not inserting the sleep would make t1 point to the next version's start date, which would be wrong
+    sleep(0.001)
 
     b = b.clone()
     b.name = 'v2'
@@ -60,6 +63,8 @@ def set_up_one_object_with_3_versions():
 
     sleep(0.1)
     t2 = get_utc_now()
+    # 1ms sleeps are required, since sqlite has a 1ms precision in its datetime stamps
+    sleep(0.001)
 
     b = b.clone()
     b.name = 'v3'
