@@ -1,6 +1,7 @@
 from django.db.models.deletion import DO_NOTHING
 from django.db.models.fields.related import ForeignKey, ManyToManyField, \
     resolve_relation, lazy_related_operation
+from django.db.models.query_utils import Q
 from django.db.models.sql.datastructures import Join
 from django.db.models.sql.where import ExtraWhere, WhereNode
 from django.db.models.utils import make_model_tuple
@@ -83,8 +84,13 @@ class VersionedForeignKey(ForeignKey):
                 base_filter.update(**{Versionable.OBJECT_IDENTIFIER_FIELD: getattr(obj, lh_field.attname)})
             else:
                 base_filter.update(**{rh_field.attname: getattr(obj, lh_field.attname)})
-        base_filter.update(self.get_extra_descriptor_filter(obj) or {})
-        return base_filter
+        descriptor_filter = self.get_extra_descriptor_filter(obj)
+        base_q = Q(**base_filter)
+        if isinstance(descriptor_filter, dict):
+            return base_q & Q(**descriptor_filter)
+        elif descriptor_filter:
+            return base_q & descriptor_filter
+        return base_q
         # return super(VersionedForeignKey, self).get_reverse_related_filter(obj)
 
 

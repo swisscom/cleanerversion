@@ -381,7 +381,6 @@ class VersionedQuery(Query):
         :param kwargs:
         :return: tuple
         """
-        print(filter_expr)
         lookup, value = filter_expr
         if self.querytime.active and isinstance(value, Versionable) and not value.is_latest:
             new_lookup = lookup + LOOKUP_SEP + Versionable.OBJECT_IDENTIFIER_FIELD
