@@ -12,6 +12,8 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+from __future__ import unicode_literals
+
 import datetime
 from time import sleep
 import itertools
@@ -27,7 +29,6 @@ from django.db.models.deletion import ProtectedError
 from django.test import TestCase
 from django.utils.timezone import utc
 from django.utils import six
-from django import VERSION
 
 from versions.exceptions import DeletionOfNonCurrentVersionError
 from versions.models import get_utc_now, ForeignKeyRequiresValueError, Versionable
@@ -2505,7 +2506,7 @@ class SpecifiedUUIDTest(TestCase):
         self.assertEqual(str(p_id), str(p.id))
         self.assertEqual(str(p_id), str(p.identity))
 
-        p_id = uuid.uuid5(uuid.NAMESPACE_OID, 'bar')
+        p_id = uuid.uuid5(uuid.NAMESPACE_OID, str('bar'))
         with self.assertRaises(ValueError):
             Person.objects.create(id=p_id, name="Alexis")
 
