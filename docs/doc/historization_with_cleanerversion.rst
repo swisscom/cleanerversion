@@ -518,6 +518,12 @@ Versioning an object in a ManyToMany relationship requires 3 steps to be done, i
   .. image:: ../images/clone_m2m_item_3.png
         :align: center
 
+The records in ManyToMany intermediary tables are versioned: they have ``version_birth_date``,
+``version_start_date`` and ``version_end_date`` columns.  The ForeignKey columns in ManyToMany
+Intermediary tables store the ``id`` of the referenced records.  Note that this is different than
+the VersionedForeignKeys in Versionable models, which store the ``identity`` of the referenced objects.
+This is transparent in normal usage, but can be important to keep in mind when you need to write a query
+that directly references the ForeignKey columns.
 
 Removing objects from a versioned M2M relationship
 --------------------------------------------------
@@ -542,29 +548,40 @@ Notes about using prefetch_related
 simple sting lookups or `Prefetch <https://docs.djangoproject.com/en/1.8/ref/models/querysets/#django.db.models.Prefetch>`_
 objects.
 
-When using ``prefetch_related`` with CleanerVersion, be aware that when using a ``Prefetch`` object **that
-specifies a queryset**, that you need to explicitly specify the ``as_of`` value, or use ``current``.
-A ``Prefetch`` queryset will not be automatically time-restricted based on the base queryset.
+When using ``prefetch_related`` with CleanerVersion, the generated query that fetches the related  objects will
+be time-restricted based on the base queryset.  If you provide a ``Prefetch`` object that specifies a queryset, the
+queryset must either not be time-limited (using ``.as_of()`` or ``.current``), or be time-limited with the same
+``.as_of`` or ``.current`` as the base queryset.  If the ``Prefetch`` queryset is not time-limited, but the base
+queryset is, the ``Prefetch`` queryset will adopt the same time limitation as the base queryset.
 
-For example, assuming you want everything at the time ``end_of_last_month``, do this::
+For example, assuming you want everything at the time ``end_of_last_month``, you can do this::
 
-    disciplines_prefetch = Prefetch(
-        'sportsclubs__discipline_set',
-        queryset=Discipline.objects.as_of(end_of_last_month).filter('name__startswith'='B'))
-    people_last_month = Person.objects.as_of(end_of_last_month).prefetch_related(disciplines_prefetch)
-
-On the other hand, the following ``Prefetch``, without an ``as_of`` in the queryset, would result in all
-matching ``Discipline`` objects being returned, regardless whether they existed at ``end_of_last_month``
-or not::
-
-    # Don't do this, the Prefetch queryset is missing an as_of():
+    # Prefetch queryset is not explicitly time-restricted, and will adopt the base queryset's time-restriction.
     disciplines_prefetch = Prefetch(
         'sportsclubs__discipline_set',
         queryset=Discipline.objects.filter('name__startswith'='B'))
     people_last_month = Person.objects.as_of(end_of_last_month).prefetch_related(disciplines_prefetch)
 
+or this::
+
+    # Prefetch queryset is explicitly time-restricted with the same time restriction as the base queryset.
+    disciplines_prefetch = Prefetch(
+        'sportsclubs__discipline_set',
+        queryset=Discipline.objects.as_of(end_of_last_month).filter('name__startswith'='B'))
+    people_last_month = Person.objects.as_of(end_of_last_month).prefetch_related(disciplines_prefetch)
+
+However, the following ``Prefetch``, without a time restriction that differs from the base queryset, will
+raise a ``ValueError`` when evaluated::
+
+    # Don't do this, the Prefetch queryset's time restriction doesn't match it's parent's:
+    disciplines_prefetch = Prefetch(
+        'sportsclubs__discipline_set',
+        queryset=Discipline.objects.current.filter('name__startswith'='B'))
+    people_last_month = Person.objects.as_of(end_of_last_month).prefetch_related(disciplines_prefetch)
+
+
 If a ``Prefetch`` without an explicit queryset is used, or a simple string lookup, the generated queryset will
-be appropriately time-restricted.  The following statements will propagate the base queries'
+be appropriately time-restricted.  The following statements will propagate the base query's
 ``as_of`` value to the generated related-objects queryset::
 
     people1 = Person.objects.as_of(end_of_last_month).prefetch_related(Prefetch('sportsclubs__discipline_set'))

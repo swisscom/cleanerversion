@@ -2313,6 +2313,21 @@ class PrefetchingHistoricTests(TestCase):
             team = [t for t in current_city.prefetched_teams if t.name == 'team1.v2'][0]
             self.assertSetEqual({'pl1.v2', 'pl2.v1'}, {p.name for p in team.prefetched_players})
 
+        # When a different time is specified for the prefetch queryset than for the base queryset:
+        with self.assertRaises(ValueError):
+            _ = City.objects.current.filter(name='city.v2').prefetch_related(
+                Prefetch(
+                    'team_set',
+                    queryset=Team.objects.as_of(self.time1),
+                    to_attr='prefetched_teams'
+                ),
+                Prefetch(
+                    'prefetched_teams__player_set',
+                    queryset=Player.objects.as_of(self.time1),
+                    to_attr='prefetched_players'
+                ),
+            )[0]
+
     def test_reverse_fk_simple_prefetch_with_historic_versions(self):
         """
         prefetch_related with simple lookup.
@@ -2366,6 +2381,75 @@ class PrefetchingHistoricTests(TestCase):
             self.assertSetEqual({'team1.v2', 'team2.v1'}, {t.name for t in current_city.team_set.all()})
             team = [t for t in current_city.team_set.all() if t.name == 'team1.v2'][0]
             self.assertSetEqual({'pl1.v2', 'pl2.v1'}, {p.name for p in team.player_set.all()})
+
+    def test_foreign_key_prefetch_with_historic_version(self):
+        self.modify_objects()
+        historic_city = City.objects.as_of(self.time1).get(identity=self.c1.identity)
+
+        # Test with a simple prefetch.
+        with self.assertNumQueries(2):
+            team = Team.objects.as_of(self.time1).filter(
+                identity=self.t1.identity
+            ).prefetch_related(
+                'city'
+            )[0]
+            self.assertIsNotNone(team.city)
+            self.assertEquals(team.city.id, historic_city.id)
+
+        # Test with a Prefetch object without a queryset.
+        with self.assertNumQueries(2):
+            team = Team.objects.as_of(self.time1).filter(
+                identity=self.t1.identity
+            ).prefetch_related(Prefetch(
+                'city',
+            ))[0]
+            self.assertIsNotNone(team.city)
+            self.assertEquals(team.city.id, historic_city.id)
+
+        # Test with a Prefetch object with a queryset with an explicit as_of.
+        with self.assertNumQueries(2):
+            team = Team.objects.as_of(self.time1).filter(
+                identity=self.t1.identity
+            ).prefetch_related(Prefetch(
+                'city',
+                queryset=City.objects.as_of(self.time1)
+            ))[0]
+            self.assertIsNotNone(team.city)
+            self.assertEquals(team.city.id, historic_city.id)
+
+        # Test with a Prefetch object with a queryset with no as_of.
+        with self.assertNumQueries(2):
+            team = Team.objects.as_of(self.time1).filter(
+                identity=self.t1.identity
+            ).prefetch_related(Prefetch(
+                'city',
+                queryset=City.objects.all()
+            ))[0]
+            self.assertIsNotNone(team.city)
+            self.assertEquals(team.city.id, historic_city.id)
+
+        # Test with a Prefetch object with a queryset with an as_of that differs from the parents.
+        # If permitted, it would lead to possibly incorrect results and definitely cache misses,
+        # which would defeat the purpose of using prefetch_related.  So a ValueError should be raised.
+        with self.assertRaises(ValueError):
+            team = Team.objects.as_of(self.time1).filter(
+                identity=self.t1.identity
+            ).prefetch_related(Prefetch(
+                'city',
+                queryset=City.objects.current
+            ))[0]
+
+        # Test with a Prefetch object with a queryset with an as_of, when the parent has no as_of.
+        # This is a bit of an odd thing to do, but possible.
+        with self.assertNumQueries(2):
+            team = Team.objects.filter(
+                identity=self.t1.identity
+            ).prefetch_related(Prefetch(
+                'city',
+                queryset=City.objects.as_of(self.time1)
+            ))[0]
+            self.assertIsNotNone(team.city)
+            self.assertEquals(team.city.id, historic_city.id)
 
 
 class IntegrationNonVersionableModelsTests(TestCase):
