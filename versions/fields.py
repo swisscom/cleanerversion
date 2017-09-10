@@ -20,15 +20,7 @@ class VersionedForeignKey(ForeignKey):
     """
 
     def __init__(self, *args, **kwargs):
-        is_m2m_vfk = kwargs.pop('is_m2m_vfk', False)
-        # The is_m2m_vfk argument is used to indicate whether or not the VersionedForeignKey is part of a
-        # M2M intermediary model
         super(VersionedForeignKey, self).__init__(*args, **kwargs)
-        # In the regular case, let's switch 'id' with 'identity', since we always query on identity
-        if not is_m2m_vfk:
-            for index, field in enumerate(self.to_fields):
-                if field == Versionable.VERSION_IDENTIFIER_FIELD:
-                    self.to_fields[index] = Versionable.OBJECT_IDENTIFIER_FIELD
 
     def contribute_to_class(self, cls, name, virtual_only=False):
         super(VersionedForeignKey, self).contribute_to_class(cls, name, virtual_only)
@@ -83,6 +75,16 @@ class VersionedForeignKey(ForeignKey):
                     lhs_col_name = Versionable.OBJECT_IDENTIFIER_FIELD
             joining_columns = joining_columns + ((lhs_col_name, rhs_col_name),)
         return joining_columns
+
+    def get_reverse_related_filter(self, obj):
+        base_filter = {}
+        for lh_field, rh_field in self.related_fields:
+            if rh_field.attname == Versionable.VERSION_IDENTIFIER_FIELD:
+                base_filter.update({Versionable.OBJECT_IDENTIFIER_FIELD: getattr(obj, lh_field.attname)})
+            else:
+                base_filter.update({rh_field.attname: getattr(obj, lh_field.attname)})
+        base_filter.update(self.get_extra_descriptor_filter(obj) or {})
+        return base_filter
 
 
 class VersionedManyToManyField(ManyToManyField):
@@ -175,7 +177,6 @@ class VersionedManyToManyField(ManyToManyField):
                 db_constraint=field.remote_field.db_constraint,
                 auto_created=name,
                 on_delete=DO_NOTHING,
-                is_m2m_vfk=True,
             ),
             to: VersionedForeignKey(
                 to_model,
@@ -184,7 +185,6 @@ class VersionedManyToManyField(ManyToManyField):
                 db_constraint=field.remote_field.db_constraint,
                 auto_created=name,
                 on_delete=DO_NOTHING,
-                is_m2m_vfk=True,
             ),
         })
 

@@ -1,3 +1,5 @@
+from collections import namedtuple
+
 from django.core.exceptions import SuspiciousOperation, FieldDoesNotExist
 from django.db import router, transaction
 from django.db.models.base import Model
@@ -48,6 +50,7 @@ class VersionedForwardManyToOneDescriptor(ForwardManyToOneDescriptor):
          """
         if queryset is None:
             queryset = self.get_queryset()
+        queryset._add_hints(instance=instances[0])
 
         # CleanerVersion change 1: force the querytime to be the same as the prefetched-for instance.
         # This is necessary to have reliable results and avoid extra queries for cache misses when
@@ -60,7 +63,39 @@ class VersionedForwardManyToOneDescriptor(ForwardManyToOneDescriptor):
             else:
                 queryset.querytime = instance_querytime
 
-        return super(VersionedForwardManyToOneDescriptor, self).get_prefetch_queryset(instances, queryset)
+        # CleanerVersion change 2: make rel_obj_attr return a tuple with the object's identity.
+        # rel_obj_attr = self.field.get_foreign_related_value
+        def versioned_fk_rel_obj_attr(versioned_rel_obj):
+            return versioned_rel_obj.identity,
+
+        rel_obj_attr = versioned_fk_rel_obj_attr
+        instance_attr = self.field.get_local_related_value
+        instances_dict = {instance_attr(inst): inst for inst in instances}
+        # CleanerVersion change 3: fake the related field so that it provides a name of 'identity'.
+        # related_field = self.field.foreign_related_fields[0]
+        related_field = namedtuple('VersionedRelatedFieldTuple', 'name')('identity')
+
+        # FIXME: This will need to be revisited when we introduce support for
+        # composite fields. In the meantime we take this practical approach to
+        # solve a regression on 1.6 when the reverse manager in hidden
+        # (related_name ends with a '+'). Refs #21410.
+        # The check for len(...) == 1 is a special case that allows the query
+        # to be join-less and smaller. Refs #21760.
+        if self.field.rel.is_hidden() or len(self.field.foreign_related_fields) == 1:
+            query = {'%s__in' % related_field.name: set(instance_attr(inst)[0] for inst in instances)}
+            # query = {'identity__in': set(instance_attr(inst)[0] for inst in instances)}
+        else:
+            query = {'%s__in' % self.field.related_query_name(): instances}
+        queryset = queryset.filter(**query)
+
+        # Since we're going to assign directly in the cache,
+        # we must manage the reverse relation cache manually.
+        if not self.field.rel.multiple:
+            rel_obj_cache_name = self.field.rel.get_cache_name()
+            for rel_obj in queryset:
+                instance = instances_dict[rel_obj_attr(rel_obj)]
+                setattr(rel_obj, rel_obj_cache_name, instance)
+        return queryset, rel_obj_attr, instance_attr, True, self.cache_name
 
     def get_queryset(self, **hints):
         queryset = super(VersionedForwardManyToOneDescriptor, self).get_queryset(**hints)
