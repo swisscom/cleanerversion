@@ -31,4 +31,3 @@ script:
 # Run coveralls
 after_success:
   coveralls
-s
