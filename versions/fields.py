@@ -77,7 +77,7 @@ class VersionedForeignKey(ForeignKey):
         return joining_columns
 
     def get_reverse_related_filter(self, obj):
-        base_filter = {}
+        base_filter = dict()
         for lh_field, rh_field in self.related_fields:
             if isinstance(obj, Versionable) and rh_field.attname == Versionable.VERSION_IDENTIFIER_FIELD:
                 base_filter.update(**{Versionable.OBJECT_IDENTIFIER_FIELD: getattr(obj, lh_field.attname)})
