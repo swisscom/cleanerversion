@@ -387,6 +387,12 @@ class VersionedQuery(Query):
             filter_expr = (new_lookup, value.identity)
         return super(VersionedQuery, self).build_filter(filter_expr, **kwargs)
 
+    def add_immediate_loading(self, field_names):
+        # TODO: Decide, whether we always want versionable fields to be loaded, even if ``only`` is used and they would
+        # be deferred
+        # field_names += tuple(Versionable.VERSIONABLE_FIELDS)
+        super(VersionedQuery, self).add_immediate_loading(field_names)
+
 
 class VersionedQuerySet(QuerySet):
     """

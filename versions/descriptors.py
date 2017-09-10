@@ -29,9 +29,27 @@ def matches_querytime(instance, querytime):
 
 class VersionedForwardManyToOneDescriptor(ForwardManyToOneDescriptor):
     """
+    The VersionedForwardManyToOneDescriptor is used when pointing another Model using a VersionedForeignKey;
+    For example:
 
+        class Team(Versionable):
+            name = CharField(max_length=200)
+            city = VersionedForeignKey(City, null=True)
+
+    ``team.city`` is a VersionedForwardManyToOneDescriptor
     """
-    pass
+
+    def get_queryset(self, **hints):
+        queryset = super(VersionedForwardManyToOneDescriptor, self).get_queryset(**hints)
+        if hasattr(queryset, 'querytime'):
+            if 'instance' in hints:
+                instance = hints['instance']
+                if hasattr(instance, '_querytime'):
+                    if instance._querytime.active and instance._querytime != queryset.querytime:
+                        queryset = queryset.as_of(instance._querytime.time)
+                else:
+                    queryset = queryset.as_of(None)
+        return queryset
 
 
 vforward_many_to_one_descriptor_class = VersionedForwardManyToOneDescriptor
@@ -76,21 +94,8 @@ vforward_many_to_one_descriptor_class.__get__ = vforward_many_to_one_descriptor_
 class VersionedReverseManyToOneDescriptor(ReverseManyToOneDescriptor):
     @cached_property
     def related_manager_cls(self):
-        # return create_versioned_related_manager
         manager_cls = super(VersionedReverseManyToOneDescriptor, self).related_manager_cls
-
-        # if VERSION[:2] >= (1, 9):
-        # TODO: Define, what field has to be taken over here, self.rel/self.field? The WhineDrinker.hats test seems to be a good one for testing this
-
-        # rel_field = self.rel
-
         rel_field = self.field
-
-        # elif hasattr(self, 'related'):
-        #     rel_field = self.related.field
-        # else:
-        #     rel_field = self.field
-        #     rel_field = self.rel
 
         class VersionedRelatedManager(manager_cls):
             def __init__(self, instance):
@@ -129,6 +134,13 @@ class VersionedReverseManyToOneDescriptor(ReverseManyToOneDescriptor):
 
                 queryset._add_hints(instance=instances[0])
                 queryset = queryset.using(queryset._db or self._db)
+                instance_querytime = instances[0]._querytime
+                if instance_querytime.active:
+                    if queryset.querytime.active and queryset.querytime.time != instance_querytime.time:
+                        raise ValueError("A Prefetch queryset that specifies an as_of time must match "
+                                         "the as_of of the base queryset.")
+                    else:
+                        queryset.querytime = instance_querytime
 
                 rel_obj_attr = rel_field.get_local_related_value
                 instance_attr = rel_field.get_foreign_related_value
