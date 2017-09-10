@@ -79,12 +79,13 @@ class VersionedForeignKey(ForeignKey):
     def get_reverse_related_filter(self, obj):
         base_filter = {}
         for lh_field, rh_field in self.related_fields:
-            if rh_field.attname == Versionable.VERSION_IDENTIFIER_FIELD:
+            if isinstance(obj, Versionable) and rh_field.attname == Versionable.VERSION_IDENTIFIER_FIELD:
                 base_filter.update({Versionable.OBJECT_IDENTIFIER_FIELD: getattr(obj, lh_field.attname)})
             else:
                 base_filter.update({rh_field.attname: getattr(obj, lh_field.attname)})
         base_filter.update(self.get_extra_descriptor_filter(obj) or {})
         return base_filter
+        # return super(VersionedForeignKey, self).get_reverse_related_filter(obj)
 
 
 class VersionedManyToManyField(ManyToManyField):

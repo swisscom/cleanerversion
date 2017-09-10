@@ -2853,7 +2853,6 @@ class DeferredFieldsTest(TestCase):
             self.assertEquals(self.c1.version_start_date, deferred.version_start_date)
 
     def test_deferred_foreign_key_field(self):
-
         team_full = Team.objects.current.get(pk=self.team1.pk)
         self.assertIn('city_id', team_full.__dict__ )
         team_light = Team.objects.current.only('name').get(pk=self.team1.pk)
