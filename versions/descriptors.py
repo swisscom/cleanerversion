@@ -39,6 +39,29 @@ class VersionedForwardManyToOneDescriptor(ForwardManyToOneDescriptor):
     ``team.city`` is a VersionedForwardManyToOneDescriptor
     """
 
+    def get_prefetch_queryset(self, instances, queryset=None):
+        """
+         Overrides the parent method to:
+         - force queryset to use the querytime of the parent objects
+         - ensure that the join is done on identity, not id
+         - make the cache key identity, not id.
+         """
+        if queryset is None:
+            queryset = self.get_queryset()
+
+        # CleanerVersion change 1: force the querytime to be the same as the prefetched-for instance.
+        # This is necessary to have reliable results and avoid extra queries for cache misses when
+        # accessing the child objects from their parents (e.g. choice.poll).
+        instance_querytime = instances[0]._querytime
+        if instance_querytime.active:
+            if queryset.querytime.active and queryset.querytime.time != instance_querytime.time:
+                raise ValueError("A Prefetch queryset that specifies an as_of time must match "
+                                 "the as_of of the base queryset.")
+            else:
+                queryset.querytime = instance_querytime
+
+        return super(VersionedForwardManyToOneDescriptor, self).get_prefetch_queryset(instances, queryset)
+
     def get_queryset(self, **hints):
         queryset = super(VersionedForwardManyToOneDescriptor, self).get_queryset(**hints)
         if hasattr(queryset, 'querytime'):
