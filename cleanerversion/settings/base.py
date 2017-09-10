@@ -98,3 +98,5 @@ USE_TZ = True
 ROOT_URLCONF = 'cleanerversion.urls'
 
 STATIC_URL = '/static/'
+
+VERSIONS_USE_UUIDFIELD = False
