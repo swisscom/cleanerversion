@@ -3,7 +3,7 @@ Historization with CleanerVersion
 *********************************
 
 Disclaimer: This documentation as well as the CleanerVersion application code have been written to work against Django
-1.8.x. The documentation may not be accurate anymore when using more recent versions of Django.
+1.9.x through 1.11.x. The documentation may not be accurate anymore when using more recent versions of Django.
 
 .. _cleanerversion-quick-starter:
 
@@ -56,8 +56,8 @@ would be a working example, if place in the same source file. Here's how::
         phone = CharField(max_length=200)
 
 Assuming you know how to deal with `Django Models <https://docs.djangoproject.com/en/stable/topics/db/models/>`_ (you
-will need to sync your DB before your code gets usable; Or you're only testing, then that step is done by Django), the
-next step is using your model to create some entries::
+will need to migrate your DB before your code gets usable; Or you're only testing, then that step is done by Django),
+the next step is using your model to create some entries::
 
     p = Person.objects.create(name='Donald Fauntleroy Duck', address='Duckburg', phone='123456')
     t1 = datetime.utcnow().replace(tzinfo=utc)
@@ -304,8 +304,8 @@ Here's an example with a sportsclub that can practice at most one sporty discipl
         name = CharField(max_length=200)
         rules = CharField(max_length=200)
 
-If a M2O relationship can also be unset, don't forget to set the nullable flag (null=true) as an argument of the
-``VersionedForeignKey`` field.
+If a many-to-one (M2O) relationship can also be unset, don't forget to set the nullable flag (null=true) as an argument
+of the ``VersionedForeignKey`` field.
 
 Adding objects to a versioned M2O relationship
 ----------------------------------------------
@@ -538,8 +538,8 @@ The syntax for soft-deleting is the same as the standard Django Model deletion s
 
 Notes about using prefetch_related
 ----------------------------------
-`prefetch_related <https://docs.djangoproject.com/en/1.8/ref/models/querysets/#prefetch-related>`_ accepts
-simple sting lookups or `Prefetch <https://docs.djangoproject.com/en/1.8/ref/models/querysets/#django.db.models.Prefetch>`_
+`prefetch_related <https://docs.djangoproject.com/en/stable/ref/models/querysets/#prefetch-related>`_ accepts
+simple sting lookups or `Prefetch <https://docs.djangoproject.com/en/stable/ref/models/querysets/#django.db.models.Prefetch>`_
 objects.
 
 When using ``prefetch_related`` with CleanerVersion, the generated query that fetches the related  objects will
@@ -597,6 +597,7 @@ If you have an object item1, and know that it existed at some other time t1, you
 
 Accessing the current version of an object
 ------------------------------------------
+
 ``current_version(obj)`` will return the latest version of the obj, or ``None`` if no version is currently active.
 
 Note that if the current object thinks that it is the current object (e.g. ``version_end_date`` is ``None``),
@@ -645,10 +646,12 @@ reverse foreign key, one-to-one or many-to-many fields).  Valid values for ``rel
 
 Deleting objects
 ================
+
 You can expect ``delete()`` to behave like you are accustomed to in Django, with these differences:
 
 Not actually deleted from the database
 --------------------------------------
+
 When you call ``delete()`` on a versioned object, it is not actually removed from the database.  Instead, it's
 ``version_end_date`` is changed from None to a timestamp.
 
@@ -657,6 +660,7 @@ they are terminated by setting a ``version_end_date``.
 
 on_delete handlers
 ------------------
+
 `on_delete handlers <https://docs.djangoproject.com/en/stable/ref/models/fields/#django.db.models.ForeignKey.on_delete>`_
 behave like this:
 
@@ -773,15 +777,17 @@ will need to be ready to handle that.
 Postgresql specific
 ===================
 
-Django creates `extra indexes <https://docs.djangoproject.com/en/1.8/ref/databases/#indexes-for-varchar-and-text-columns>`_
-for CharFields that are used for like queries (e.g. WHERE foo like 'fish%'). Since Django 1.6 (the version CleanerVersion originally
-targeted) did not have native database UUID fields, the UUID fields that are used for the id and identity columns of Versionable models
-have these extra indexes created.  In fact, these fields will never be compared using the like operator.  Leaving these indexes would create a
-performance penalty for inserts and updates, especially for larger tables.  ``versions.util.postgresql`` has a function
-``remove_uuid_id_like_indexes`` that can be used to remove these extra indexes.
+Django creates `extra indexes <https://docs.djangoproject.com/en/stable/ref/databases/#indexes-for-varchar-and-text-columns>`_
+for CharFields that are used for like queries (e.g. WHERE foo like 'fish%'). Since Django 1.6 (the version
+CleanerVersion originally targeted) did not have native database UUID fields, the UUID fields that are used for the id
+and identity columns of Versionable models have these extra indexes created.  In fact, these fields will never be
+compared using the like operator.  Leaving these indexes would create a performance penalty for inserts and updates,
+especially for larger tables.  ``versions.util.postgresql`` has a function ``remove_uuid_id_like_indexes`` that can be
+used to remove these extra indexes.
 
-For the issue of `Unique Indexes`_, ``versions.util.postgresql`` has a function ``create_current_version_unique_indexes`` that can
-be used to create unique indexes.  For this to work, it's necessary to define a VERSION_UNIQUE attribute when defining the model::
+For the issue of `Unique Indexes`_, ``versions.util.postgresql`` has a function
+``create_current_version_unique_indexes`` that can be used to create unique indexes.  For this to work, it's necessary
+to define a VERSION_UNIQUE attribute when defining the model::
 
     class Person(Versionable):
         name = models.CharField(max_length=40)
@@ -841,6 +847,13 @@ object is current.
 
 Upgrade notes
 =============
+
+CleanerVersion 2.x / Django 1.9/1.10/1.11
+-------------------------------------------
+
+In Django 1.9 major changes to the ORM layer have been introduced, which made existing versions of CleanerVersion for
+incompatible with Django 1.9 onwards. We decided to release a separate major version to support the Django 1.9 to 1.11.
+
 CleanerVersion 1.6.0 / Django 1.8.3
 -----------------------------------
 Starting with CleanerVersion 1.6.0, Django's ``UUIDField`` will be used for the ``id``, ``identity``,
@@ -870,8 +883,8 @@ You must choose one or the other solution; not doing so will result in your appl
 Known Issues
 ============
 
-* No `multi-table inheritance <https://docs.djangoproject.com/en/stable/topics/db/models/#multi-table-inheritance>`_ support.
-  Multi-table inheritance currently does not work if the parent model has a Versionable base class.
+* No `multi-table inheritance <https://docs.djangoproject.com/en/stable/topics/db/models/#multi-table-inheritance>`_
+  support. Multi-table inheritance currently does not work if the parent model has a Versionable base class.
   See `this issue <https://github.com/swisscom/cleanerversion/issues/19>`_ for more details.
 
 * Creating `Unique Indexes`_ is a bit tricky for versioned database tables.  A solution is provided for Postgresql (see the
