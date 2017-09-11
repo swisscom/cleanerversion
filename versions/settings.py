@@ -1,19 +1,19 @@
-from django.conf import settings as django_settings
 import importlib
-from django import VERSION
 
+from django import VERSION
+from django.conf import settings as django_settings
 
 _cache = {}
 
 
 class VersionsSettings(object):
     """
-    Gets a setting from django.conf.settings if set, otherwise from the defaults
-    defined in this class.
+    Gets a setting from django.conf.settings if set, otherwise from the
+    defaults defined in this class.
 
-    A magic accessor is used instead of just defining module-level variables because
-    Django doesn't like attributes of the django.conf.settings object to be accessed in
-    module scope.
+    A magic accessor is used instead of just defining module-level variables
+    because Django doesn't like attributes of the django.conf.settings object
+    to be accessed in module scope.
     """
 
     defaults = {
@@ -28,7 +28,9 @@ class VersionsSettings(object):
             try:
                 return self.defaults[name]
             except KeyError:
-                raise AttributeError("{} object has no attribute {}".format(self.__class__, name))
+                raise AttributeError(
+                    "{} object has no attribute {}".format(self.__class__,
+                                                           name))
 
 
 settings = VersionsSettings()
@@ -45,8 +47,11 @@ def import_from_string(val, setting_name):
         module = importlib.import_module(module_path)
         return getattr(module, class_name)
     except ImportError as e:
-        raise ImportError("Could not import '{}' for CleanerVersion setting '{}'. {}: {}.".format(
-            (val, setting_name, e.__class__.__name__, e)))
+        raise ImportError("Could not import '{}' for CleanerVersion "
+                          "setting '{}'. {}: {}.".format((val,
+                                                          setting_name,
+                                                          e.__class__.__name__,
+                                                          e)))
 
 
 def get_versioned_delete_collector_class():

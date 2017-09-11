@@ -1,6 +1,7 @@
 from django.apps import AppConfig
-from django.db.models.signals import post_migrate
 from django.db import connection
+from django.db.models.signals import post_migrate
+
 
 def index_adjustments(sender, using=None, **kwargs):
     """
@@ -18,6 +19,7 @@ def index_adjustments(sender, using=None, **kwargs):
     remove_uuid_id_like_indexes(sender.name, using)
     create_current_version_unique_indexes(sender.name, using)
     create_current_version_unique_identity_indexes(sender.name, using)
+
 
 class VersionsTestsConfig(AppConfig):
     name = 'versions_tests'
