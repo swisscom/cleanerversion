@@ -3,10 +3,6 @@ python:
   - "2.7"
   - "3.6"
 
-env:
-  - TOX_ENV=django19-pg
-  - TOX_ENV=django19-sqlite
-
 # Enable PostgreSQL usage
 addons:
   postgresql: "9.3"
@@ -26,7 +22,7 @@ before_script:
 
 # Run tests
 script:
-  tox -e $TOX_ENV
+  tox
 
 # Run coveralls
 after_success:
