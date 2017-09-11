@@ -1,8 +1,6 @@
 #!/usr/bin/env python
 from setuptools import setup, find_packages
 
-import cleanerversion
-
 """
 Documentation can be found at https://docs.python.org/2/distutils/index.html, 
 but usually you only need to do the following steps to publish a new package 
@@ -26,7 +24,7 @@ If you get errors, check the following things:
     Reduce the set of formats or install libs
 """
 
-version = cleanerversion.get_version()
+version = __import__('cleanerversion').get_version()
 
 setup(name='CleanerVersion',
       version=version,
