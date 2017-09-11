@@ -837,8 +837,12 @@ class Versionable(models.Model):
                 # Set all non-provided ForeignKeys to None.  If required, raise an error.
                 try:
                     setattr(restored, field.name, None)
-                except ValueError as e:
-                    raise ForeignKeyRequiresValueError(e.args[0])
+                    # Check for non null foreign key removed since Django 1.10
+                    # https://docs.djangoproject.com/en/1.10/releases/1.10/#removed-null-assignment-check-for-non-null-foreign-key-fields
+                    if not field.null:
+                        raise ValueError
+                except ValueError:
+                    raise ForeignKeyRequiresValueError
 
         self.id = self.uuid()
 

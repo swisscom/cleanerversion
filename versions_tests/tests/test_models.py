@@ -29,7 +29,6 @@ from django.db.models.deletion import ProtectedError
 from django.test import TestCase
 from django.utils.timezone import utc
 from django.utils import six
-from django import VERSION
 
 from versions.exceptions import DeletionOfNonCurrentVersionError
 from versions.models import get_utc_now, ForeignKeyRequiresValueError, Versionable
@@ -55,6 +54,8 @@ def set_up_one_object_with_3_versions():
 
     sleep(0.001)
     t1 = get_utc_now()
+    # 1ms sleeps are required, since sqlite has a 1ms precision in its datetime stamps
+    # not inserting the sleep would make t1 point to the next version's start date, which would be wrong
     sleep(0.001)
 
     b = b.clone()
@@ -63,6 +64,7 @@ def set_up_one_object_with_3_versions():
 
     sleep(0.001)
     t2 = get_utc_now()
+    # 1ms sleeps are required, since sqlite has a 1ms precision in its datetime stamps
     sleep(0.001)
 
     b = b.clone()
@@ -2187,6 +2189,12 @@ class PrefetchingTests(TestCase):
             name_list.append(p.name)
 
         with self.assertNumQueries(2):
+            old_award_players =  list(
+                    Player.objects.as_of(t2).prefetch_related('awards').filter(
+                        name__in=name_list).order_by('name')
+                )
+
+        with self.assertNumQueries(2):
             updated_award_players = list(
                 Player.objects.current.prefetch_related('awards').filter(
                     name__in=name_list).order_by('name')
@@ -2194,7 +2202,7 @@ class PrefetchingTests(TestCase):
 
         with self.assertNumQueries(0):
             for i in range(len(award_players)):
-                old = len(award_players[i].awards.all())
+                old = len(old_award_players[i].awards.all())
                 new = len(updated_award_players[i].awards.all())
                 self.assertTrue(new == old - 1)
 
