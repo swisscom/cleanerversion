@@ -32,7 +32,7 @@ Local Testing
 To test locally on the various environments that are tested by Travis, you can use `tox <https://testrun.org/tox/latest/>`_.
 To do this, these dependencies must be installed:
 
-* python 2.7 and python 3.4
+* python 2.7 and python 3.6
 * tox (if you're using pip, you can install tox with ``pip install tox``)
 * postgresql 9.3.x
 
