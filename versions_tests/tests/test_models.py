@@ -2553,9 +2553,8 @@ class PrefetchingHistoricTests(TestCase):
             self.assertSetEqual({'pl1.v2', 'pl2.v1'},
                                 {p.name for p in team.prefetched_players})
 
-            # When a different time is specified for the prefetch queryset
-            # than for the base queryset:
-
+        # When a different time is specified for the prefetch queryset than
+        # for the base queryset:
         with self.assertRaises(ValueError):
             _ = City.objects.current.filter(name='city.v2').prefetch_related(
                 Prefetch(
