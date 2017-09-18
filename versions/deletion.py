@@ -1,9 +1,9 @@
-from django import VERSION
 from django.db.models.deletion import (
     attrgetter, signals, six, sql, transaction,
     CASCADE,
     Collector,
 )
+
 import versions.models
 
 
@@ -68,7 +68,8 @@ class VersionedCollector(Collector):
                         # In the case of a SET.. method, clone before changing the value (if it hasn't already been
                         # cloned)
                         updated_instances = set()
-                        if not(isinstance(field, versions.models.VersionedForeignKey) and field.rel.on_delete == CASCADE):
+                        if not (
+                            isinstance(field, versions.fields.VersionedForeignKey) and field.rel.on_delete == CASCADE):
                             for instance in instances:
                                 # Clone before updating
                                 cloned = id_map.get(instance.pk, None)
@@ -76,7 +77,7 @@ class VersionedCollector(Collector):
                                     cloned = instance.clone()
                                 id_map[instance.pk] = cloned
                                 updated_instances.add(cloned)
-                                #TODO: instance should get updated with new values from clone ?
+                                # TODO: instance should get updated with new values from clone ?
                         instances_for_fieldvalues[(field, value)] = updated_instances
 
                 # Replace the instances with their clones in self.data, too
@@ -135,12 +136,11 @@ class VersionedCollector(Collector):
         Gets a QuerySet of current objects related to ``objs`` via the relation ``related``.
 
         """
-        if VERSION >= (1, 8):
-            related_model = related.related_model
-        else:
-            related_model = related.model
+        from versions.models import Versionable
+
+        related_model = related.related_model
         manager = related_model._base_manager
-        if issubclass(related_model, versions.models.Versionable):
+        if issubclass(related_model, Versionable):
             manager = manager.current
         return manager.using(self.using).filter(
             **{"%s__in" % related.field.name: objs}

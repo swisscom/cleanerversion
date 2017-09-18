@@ -16,3 +16,5 @@ DATABASES = {
         'PORT': '5432',
     },
 }
+
+VERSIONS_USE_UUIDFIELD = True

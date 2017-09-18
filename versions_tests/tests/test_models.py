@@ -12,6 +12,8 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+from __future__ import unicode_literals
+
 import datetime
 from time import sleep
 import itertools
@@ -27,7 +29,6 @@ from django.db.models.deletion import ProtectedError
 from django.test import TestCase
 from django.utils.timezone import utc
 from django.utils import six
-from django import VERSION
 
 from versions.exceptions import DeletionOfNonCurrentVersionError
 from versions.models import get_utc_now, ForeignKeyRequiresValueError, Versionable
@@ -38,12 +39,8 @@ from versions_tests.models import (
 
 
 def get_relation_table(model_class, fieldname):
-
-    if VERSION[:2] >= (1, 8):
-        field_object = model_class._meta.get_field(fieldname)
-        direct = not field_object.auto_created or field_object.concrete
-    else:
-        field_object, _, direct, _ = model_class._meta.get_field_by_name(fieldname)
+    field_object = model_class._meta.get_field(fieldname)
+    direct = not field_object.auto_created or field_object.concrete
 
     if direct:
         field = field_object
@@ -55,21 +52,26 @@ def get_relation_table(model_class, fieldname):
 def set_up_one_object_with_3_versions():
     b = B.objects.create(name='v1')
 
-    sleep(0.1)
+    sleep(0.001)
     t1 = get_utc_now()
+    # 1ms sleeps are required, since sqlite has a 1ms precision in its datetime stamps
+    # not inserting the sleep would make t1 point to the next version's start date, which would be wrong
+    sleep(0.001)
 
     b = b.clone()
     b.name = 'v2'
     b.save()
 
-    sleep(0.1)
+    sleep(0.001)
     t2 = get_utc_now()
+    # 1ms sleeps are required, since sqlite has a 1ms precision in its datetime stamps
+    sleep(0.001)
 
     b = b.clone()
     b.name = 'v3'
     b.save()
 
-    sleep(0.1)
+    sleep(0.001)
     t3 = get_utc_now()
 
     return b, t1, t2, t3
@@ -1959,7 +1961,7 @@ class ReverseForeignKeyDirectAssignmentTests(TestCase):
         self.c1.team_set = []
 
         self.team10 = Team.objects.current.get(identity=self.team10.identity).clone()
-        self.c10.team_set = []
+        self.c10.team_set.clear()
         self.t3 = get_utc_now()
 
     def test_t1_relations_for_cloned_referenced_object(self):
@@ -2187,6 +2189,12 @@ class PrefetchingTests(TestCase):
             name_list.append(p.name)
 
         with self.assertNumQueries(2):
+            old_award_players =  list(
+                    Player.objects.as_of(t2).prefetch_related('awards').filter(
+                        name__in=name_list).order_by('name')
+                )
+
+        with self.assertNumQueries(2):
             updated_award_players = list(
                 Player.objects.current.prefetch_related('awards').filter(
                     name__in=name_list).order_by('name')
@@ -2194,7 +2202,7 @@ class PrefetchingTests(TestCase):
 
         with self.assertNumQueries(0):
             for i in range(len(award_players)):
-                old = len(award_players[i].awards.all())
+                old = len(old_award_players[i].awards.all())
                 new = len(updated_award_players[i].awards.all())
                 self.assertTrue(new == old - 1)
 
@@ -2318,13 +2326,13 @@ class PrefetchingHistoricTests(TestCase):
             _ = City.objects.current.filter(name='city.v2').prefetch_related(
                 Prefetch(
                     'team_set',
-                    queryset=Team.objects.as_of(self.time1),
-                    to_attr='prefetched_teams'
+                    queryset = Team.objects.as_of(self.time1),
+                    to_attr = 'prefetched_teams'
                 ),
                 Prefetch(
                     'prefetched_teams__player_set',
-                    queryset=Player.objects.as_of(self.time1),
-                    to_attr='prefetched_players'
+                    queryset = Player.objects.as_of(self.time1),
+                    to_attr = 'prefetched_players'
                 ),
             )[0]
 
@@ -2582,7 +2590,7 @@ class SpecifiedUUIDTest(TestCase):
         self.assertEqual(str(p_id), str(p.id))
         self.assertEqual(str(p_id), str(p.identity))
 
-        p_id = uuid.uuid5(uuid.NAMESPACE_OID, 'bar')
+        p_id = uuid.uuid5(uuid.NAMESPACE_OID, str('bar'))
         with self.assertRaises(ValueError):
             Person.objects.create(id=p_id, name="Alexis")
 
@@ -2634,10 +2642,13 @@ class VersionRestoreTest(TestCase):
 
     def test_restore_latest_version(self):
         self.setup_common()
+        sleep(0.001)
         self.player1.delete()
+        sleep(0.001)
         deleted_at = self.player1.version_end_date
         player1_pk = self.player1.pk
 
+        sleep(0.001)
         restored = self.player1.restore()
         self.assertEqual(player1_pk, restored.pk)
         self.assertIsNone(restored.version_end_date)
@@ -2849,7 +2860,6 @@ class DeferredFieldsTest(TestCase):
             self.assertEquals(self.c1.version_start_date, deferred.version_start_date)
 
     def test_deferred_foreign_key_field(self):
-
         team_full = Team.objects.current.get(pk=self.team1.pk)
         self.assertIn('city_id', team_full.__dict__ )
         team_light = Team.objects.current.only('name').get(pk=self.team1.pk)

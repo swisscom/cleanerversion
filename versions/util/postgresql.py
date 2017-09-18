@@ -1,6 +1,6 @@
 from __future__ import absolute_import
 from django.db import connection as default_connection
-from versions.models import VersionedForeignKey
+from versions.fields import VersionedForeignKey
 from .helper import database_connection, versionable_models
 
 

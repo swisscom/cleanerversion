@@ -9,8 +9,10 @@ https://docs.djangoproject.com/en/dev/ref/settings/
 """
 
 from __future__ import absolute_import
-from django.utils.crypto import get_random_string
+
 import os
+
+from django.utils.crypto import get_random_string
 
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)) + '/..')
 
@@ -20,9 +22,17 @@ SECRET_KEY = get_random_string(50, chars)
 
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = True
-TEMPLATE_DEBUG = True
-
-
+TEMPLATES = [
+    {
+        'BACKEND': 'django.template.backends.django.DjangoTemplates',
+        'DIRS': [],
+        'APP_DIRS': True,
+        'OPTIONS': {
+            'context_processors': ['django.contrib.auth.context_processors.auth',
+                                   'django.contrib.messages.context_processors.messages'],
+        },
+    },
+]
 
 ALLOWED_HOSTS = []
 
@@ -64,7 +74,7 @@ INSTALLED_APPS = (
     'django.contrib.messages',
     'django.contrib.staticfiles',
     'versions',
-    'versions_tests',
+    'versions_tests.apps.VersionsTestsConfig',
 )
 
 MIDDLEWARE_CLASSES = (
@@ -85,9 +95,8 @@ USE_I18N = True
 USE_L10N = True
 USE_TZ = True
 
-
 ROOT_URLCONF = 'cleanerversion.urls'
-
 
 STATIC_URL = '/static/'
 
+VERSIONS_USE_UUIDFIELD = False
