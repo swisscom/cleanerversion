@@ -31,7 +31,7 @@ before_script:
 
 # Run tests
 script:
-  tox -e $TOX_ENV
+  tox
 
 # Run coveralls
 after_success:
