@@ -10,6 +10,7 @@ env:
   - TOX_ENV=django110-sqlite
   - TOX_ENV=django111-pg
   - TOX_ENV=django111-sqlite
+  - TOX_ENV=pep8
 
 
 # Enable PostgreSQL usage

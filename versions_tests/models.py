@@ -1,16 +1,18 @@
 from django.db.models import CharField, IntegerField, Model, ForeignKey
 from django.db.models.deletion import DO_NOTHING, PROTECT, SET, SET_NULL
-from django.db.models.fields.related import ManyToManyField
 from django.utils.encoding import python_2_unicode_compatible
 
-from versions.models import Versionable
 from versions.fields import VersionedManyToManyField, VersionedForeignKey
+from versions.models import Versionable
 
 
 def versionable_description(obj):
     return "<" + str(obj.__class__.__name__) + " object: " + \
-           obj.name + " {valid: [" + obj.version_start_date.isoformat() + " | " + (
-               obj.version_end_date.isoformat() if obj.version_end_date else "None") + "], created: " + obj.version_birth_date.isoformat() + "}>"
+           obj.name + " {valid: [" + obj.version_start_date.isoformat() + \
+           " | " + \
+           (obj.version_end_date.isoformat()
+            if obj.version_end_date else "None") + \
+           "], created: " + obj.version_birth_date.isoformat() + "}>"
 
 
 ############################################
@@ -149,8 +151,10 @@ class Student(Versionable):
 class Pupil(Versionable):
     name = CharField(max_length=200)
     phone_number = CharField(max_length=200)
-    language_teachers = VersionedManyToManyField('Teacher', related_name='language_students')
-    science_teachers = VersionedManyToManyField('Teacher', related_name='science_students')
+    language_teachers = VersionedManyToManyField(
+        'Teacher', related_name='language_students')
+    science_teachers = VersionedManyToManyField(
+        'Teacher', related_name='science_students')
 
     __str__ = versionable_description
 
@@ -216,10 +220,12 @@ class ChainStore(Versionable):
     door_color = VersionedForeignKey('Color', related_name='cs')
 
     # There are lots of these chain stores.  They follow these rules:
-    # - only one store with the same name and subchain_id can exist in a single city
+    # - only one store with the same name and subchain_id can exist in a
+    #   single city
     # - no two stores can share the same door_frame_color and door_color
     # Yea, well, they want to appeal to people who want to be different.
-    VERSION_UNIQUE = [['subchain_id', 'city', 'name'], ['door_frame_color', 'door_color']]
+    VERSION_UNIQUE = [['subchain_id', 'city', 'name'],
+                      ['door_frame_color', 'door_color']]
 
 
 class Color(Versionable):
@@ -267,4 +273,5 @@ class WineDrinkerHat(Model):
 # SelfReferencingManyToManyTest models
 class Person(Versionable):
     name = CharField(max_length=200)
-    children = VersionedManyToManyField('self', symmetrical=False, related_name='parents')
+    children = VersionedManyToManyField('self', symmetrical=False,
+                                        related_name='parents')
