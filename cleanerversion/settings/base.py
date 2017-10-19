@@ -12,6 +12,7 @@ from __future__ import absolute_import
 
 import os
 
+from django import VERSION
 from django.utils.crypto import get_random_string
 
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)) + '/..')
@@ -100,4 +101,4 @@ ROOT_URLCONF = 'cleanerversion.urls'
 
 STATIC_URL = '/static/'
 
-VERSIONS_USE_UUIDFIELD = False
+VERSIONS_USE_UUIDFIELD = VERSION[:3] >= (1, 8, 3)

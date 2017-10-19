@@ -38,6 +38,7 @@ class B(Versionable):
 # - VersionRestoreTest
 # - DetachTest
 # - DeferredFieldsTest
+# – VersionedAdminTest
 @python_2_unicode_compatible
 class City(Versionable):
     name = CharField(max_length=200)

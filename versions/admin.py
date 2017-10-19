@@ -258,11 +258,10 @@ class VersionedAdmin(admin.ModelAdmin):
         opts = model._meta
         app_label = opts.app_label
         action_list = LogEntry.objects.filter(
-            object_id=unquote(obj.identity),
+            object_id=unquote(str(obj.identity)),
             # this is the change for our override;
             content_type=get_content_type_for_model(model)
         ).select_related().order_by('action_time')
-
         ctx = self.admin_site.each_context(request)
 
         context = dict(ctx,
@@ -279,7 +278,7 @@ class VersionedAdmin(admin.ModelAdmin):
             "admin/%s/%s/object_history.html" % (app_label, opts.model_name),
             "admin/%s/object_history.html" % app_label,
             "admin/object_history.html"
-        ], context, current_app=self.admin_site.name)
+        ], context)
 
     def get_urls(self):
         """
@@ -302,7 +301,7 @@ class VersionedAdmin(admin.ModelAdmin):
         """
         Shortens identity to the last 12 characters
         """
-        return "..." + obj.identity[-12:]
+        return "..." + str(obj.identity)[-12:]
 
     identity_shortener.boolean = False
     identity_shortener.short_description = "Short Identity"
