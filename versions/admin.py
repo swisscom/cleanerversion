@@ -199,10 +199,12 @@ class VersionedAdmin(admin.ModelAdmin):
         opts = self.model._meta
         msg_dict = {
             'name': force_text(opts.verbose_name),
-            'obj': format_html('<a href="{}">{}</a>', urlquote(request.path), obj),
+            'obj': format_html('<a href="{}">{}</a>',
+                               urlquote(request.path), obj),
         }
 
-        msg = format_html(_('The {name} "{obj}" was restored successfully.'), **msg_dict)
+        msg = format_html(_('The {name} "{obj}" was restored successfully.'),
+                          **msg_dict)
         self.message_user(request, msg, messages.SUCCESS)
         return HttpResponseRedirect(path)
 

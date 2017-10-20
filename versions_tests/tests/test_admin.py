@@ -32,7 +32,9 @@ class VersionedAdminTest(TestCase):
         new_city = self.city.clone()
         new_city.name = 'new city'
         new_city.save()
-        self.assertEquals(City.objects.current_version(self.city, check_db=True), new_city)
+        self.assertEquals(City.objects.current_version(
+            self.city, check_db=True
+        ), new_city)
 
         self.client.force_login(self.user)
         response = self.client.post(reverse(
@@ -46,7 +48,6 @@ class VersionedAdminTest(TestCase):
 
     def test_restore_current_version(self):
         self.client.force_login(self.user)
-        with self.assertRaises(ValueError) as cm:
+        with self.assertRaises(ValueError):
             self.client.post(reverse('admin:versions_tests_city_change',
                              args=(self.city.identity, )) + 'restore/')
-
