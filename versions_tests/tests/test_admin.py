@@ -27,3 +27,26 @@ class VersionedAdminTest(TestCase):
         response = self.client.get(reverse(
             'admin:versions_tests_city_history', args=(self.city.id, )))
         self.assertEqual(response.status_code, 200)
+
+    def test_restore_old_version(self):
+        new_city = self.city.clone()
+        new_city.name = 'new city'
+        new_city.save()
+        self.assertEquals(City.objects.current_version(self.city, check_db=True), new_city)
+
+        self.client.force_login(self.user)
+        response = self.client.post(reverse(
+            'admin:versions_tests_city_change',
+            args=(self.city.id, )) + 'restore/')
+
+        self.assertEqual(response.status_code, 302)
+        self.assertEquals(City.objects.all().count(), 3)
+        restored_city = City.objects.current_version(self.city, check_db=True)
+        self.assertEquals(restored_city.name, self.city.name)
+
+    def test_restore_current_version(self):
+        self.client.force_login(self.user)
+        with self.assertRaises(ValueError) as cm:
+            self.client.post(reverse('admin:versions_tests_city_change',
+                             args=(self.city.identity, )) + 'restore/')
+

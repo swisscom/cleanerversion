@@ -2,7 +2,7 @@ from datetime import datetime
 
 from django import forms
 from django.conf.urls import url
-from django.contrib import admin
+from django.contrib import admin, messages
 from django.contrib.admin.checks import ModelAdminChecks
 from django.contrib.admin.options import get_content_type_for_model
 from django.contrib.admin.templatetags.admin_static import static
@@ -13,7 +13,10 @@ from django.http import HttpResponseRedirect
 from django.shortcuts import get_object_or_404
 from django.template.response import TemplateResponse
 from django.utils.encoding import force_text
+from django.utils.html import format_html
+from django.utils.http import urlquote
 from django.utils.text import capfirst
+from django.utils.translation import ugettext as _
 
 
 class DateTimeFilterForm(forms.Form):
@@ -185,13 +188,22 @@ class VersionedAdmin(admin.ModelAdmin):
         View for restoring object from change view
         """
         paths = request.path_info.split('/')
-        object_id_index = paths.index("restore") - 1
+        object_id_index = paths.index("restore") - 2
         object_id = paths[object_id_index]
 
         obj = super(VersionedAdmin, self).get_object(request, object_id)
         obj.restore()
         admin_wordIndex = object_id_index - 3
         path = "/%s" % ("/".join(paths[admin_wordIndex:object_id_index]))
+
+        opts = self.model._meta
+        msg_dict = {
+            'name': force_text(opts.verbose_name),
+            'obj': format_html('<a href="{}">{}</a>', urlquote(request.path), obj),
+        }
+
+        msg = format_html(_('The {name} "{obj}" was restored successfully.'), **msg_dict)
+        self.message_user(request, msg, messages.SUCCESS)
         return HttpResponseRedirect(path)
 
     def will_not_clone(self, request, *args, **kwargs):

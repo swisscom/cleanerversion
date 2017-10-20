@@ -13,7 +13,7 @@ function update_document() {
 function make_restore_button(){
     (function($){
         if($('ul').hasClass('object-tools')){
-            if($('div.field-is_current img').attr('alt').valueOf()=="False"){
+            if($('div.field-is_current img').attr('alt').valueOf()==="False"){
                 $('input[name="_addanother"]').before('<input formaction="restore/" type="submit" formmethod="POST" value="Restore">');
             }
         }
@@ -22,4 +22,4 @@ function make_restore_button(){
 }
 
 // give time to jquery to load..
-setTimeout("update_document();make_restore_button();", 1000);
+setTimeout("update_document();make_restore_button();", 500);
