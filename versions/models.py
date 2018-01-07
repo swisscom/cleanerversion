@@ -956,7 +956,11 @@ class Versionable(models.Model):
                   f.name not in Versionable.VERSIONABLE_FIELDS]
         for field in fields:
             if field.attname in kwargs:
-                setattr(restored, field.attname, kwargs[field.attname])
+                # Fake an object in order to avoid a DB roundtrip
+                # This was made necessary, since assigning to the field's
+                # attname did not work anymore with Django 2.0
+                obj = field.remote_field.model(id=kwargs[field.attname])
+                setattr(restored, field.name, obj)
             elif field.name in kwargs:
                 setattr(restored, field.name, kwargs[field.name])
             elif isinstance(field, ForeignKey):

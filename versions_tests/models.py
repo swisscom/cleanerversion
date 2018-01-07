@@ -1,4 +1,6 @@
-from django.db.models import CharField, IntegerField, Model, ForeignKey
+# -*- coding: utf-8 -*-
+from django.db.models import CharField, IntegerField, Model, ForeignKey, \
+    CASCADE
 from django.db.models.deletion import DO_NOTHING, PROTECT, SET, SET_NULL
 from django.utils.encoding import python_2_unicode_compatible
 
@@ -49,7 +51,7 @@ class City(Versionable):
 @python_2_unicode_compatible
 class Team(Versionable):
     name = CharField(max_length=200)
-    city = VersionedForeignKey(City, null=True)
+    city = VersionedForeignKey(City, null=True, on_delete=CASCADE)
 
     __str__ = versionable_description
 
@@ -57,7 +59,7 @@ class Team(Versionable):
 @python_2_unicode_compatible
 class Player(Versionable):
     name = CharField(max_length=200)
-    team = VersionedForeignKey(Team, null=True)
+    team = VersionedForeignKey(Team, null=True, on_delete=CASCADE)
 
     __str__ = versionable_description
 
@@ -70,7 +72,7 @@ class Award(Versionable):
 @python_2_unicode_compatible
 class Mascot(Versionable):
     name = CharField(max_length=200)
-    team = VersionedForeignKey(Team, null=False)
+    team = VersionedForeignKey(Team, null=False, on_delete=CASCADE)
 
     __str__ = versionable_description
 
@@ -115,7 +117,7 @@ class NonFan(Versionable):
 # SelfOneToManyTest models
 class Directory(Versionable):
     name = CharField(max_length=100)
-    parent = VersionedForeignKey('self', null=True)
+    parent = VersionedForeignKey('self', null=True, on_delete=CASCADE)
 
 
 # ############################################
@@ -217,8 +219,9 @@ class ChainStore(Versionable):
     city = CharField(max_length=40)
     name = CharField(max_length=40)
     opening_hours = CharField(max_length=40)
-    door_frame_color = VersionedForeignKey('Color')
-    door_color = VersionedForeignKey('Color', related_name='cs')
+    door_frame_color = VersionedForeignKey('Color', on_delete=CASCADE)
+    door_color = VersionedForeignKey('Color', related_name='cs',
+                                     on_delete=CASCADE)
 
     # There are lots of these chain stores.  They follow these rules:
     # - only one store with the same name and subchain_id can exist in a
@@ -248,7 +251,8 @@ class Wine(Model):
 @python_2_unicode_compatible
 class WineDrinker(Versionable):
     name = CharField(max_length=200)
-    glass_content = ForeignKey(Wine, related_name='drinkers', null=True)
+    glass_content = ForeignKey(Wine, related_name='drinkers', null=True,
+                               on_delete=CASCADE)
 
     __str__ = versionable_description
 
@@ -263,7 +267,8 @@ class WineDrinkerHat(Model):
                      ('Vagabond', 'Vagabond')]
     color = CharField(max_length=40)
     shape = CharField(max_length=200, choices=shape_choices, default='Sailor')
-    wearer = VersionedForeignKey(WineDrinker, related_name='hats', null=True)
+    wearer = VersionedForeignKey(WineDrinker, related_name='hats', null=True,
+                                 on_delete=CASCADE)
 
     def __str__(self):
         return "<" + str(self.__class__.__name__) + " object: " + str(

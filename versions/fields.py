@@ -91,6 +91,7 @@ class VersionedForeignKey(ForeignKey):
 
     def get_reverse_related_filter(self, obj):
         base_filter = dict()
+        timestamp_q = None
         for lh_field, rh_field in self.related_fields:
             if isinstance(obj, Versionable) and \
                             rh_field.attname == \
@@ -98,11 +99,18 @@ class VersionedForeignKey(ForeignKey):
                 base_filter.update(**{
                     Versionable.OBJECT_IDENTIFIER_FIELD:
                         getattr(obj, lh_field.attname)})
+                if hasattr(obj, 'as_of') and obj.as_of is not None:
+                    start_date_q = Q(version_start_date__lt=obj.as_of)
+                    end_date_q = Q(version_end_date__gte=obj.as_of) | \
+                                 Q(version_end_date__isnull=True)
+                    timestamp_q = start_date_q & end_date_q
             else:
                 base_filter.update(
                     **{rh_field.attname: getattr(obj, lh_field.attname)})
-        descriptor_filter = self.get_extra_descriptor_filter(obj)
         base_q = Q(**base_filter)
+        if timestamp_q:
+            base_q &= timestamp_q
+        descriptor_filter = self.get_extra_descriptor_filter(obj)
         if isinstance(descriptor_filter, dict):
             return base_q & Q(**descriptor_filter)
         elif descriptor_filter:
