@@ -3070,7 +3070,8 @@ class VersionRestoreTest(TestCase):
         self.assertEqual(3,
                          Player.objects.filter(identity=p1.identity).count())
         self.assertEqual(1, Player.objects.filter(name='p2.v1').count())
-        m2m_manager = Award._meta.get_field('players').remote_field.through.objects
+        m2m_manager = \
+            Award._meta.get_field('players').remote_field.through.objects
         self.assertEqual(1, m2m_manager.all().count())
 
     def test_restore_two_in_memory_objects(self):

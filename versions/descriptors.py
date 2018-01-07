@@ -118,7 +118,8 @@ class VersionedForwardManyToOneDescriptor(ForwardManyToOneDescriptor):
                     self.field.get_cache_name(), False)
 
     def get_queryset(self, **hints):
-        queryset = self.field.remote_field.model.objects.db_manager(hints=hints).all()
+        queryset = self.field.remote_field.model.objects\
+            .db_manager(hints=hints).all()
         if hasattr(queryset, 'querytime'):
             if 'instance' in hints:
                 instance = hints['instance']
@@ -133,8 +134,8 @@ class VersionedForwardManyToOneDescriptor(ForwardManyToOneDescriptor):
     def __get__(self, instance, cls=None):
         """
         The getter method returns the object, which points instance,
-        e.g. choice.poll returns a Poll instance, whereas the Poll class defines
-        the ForeignKey.
+        e.g. choice.poll returns a Poll instance, whereas the Poll class
+        defines the ForeignKey.
 
         :param instance: The object on which the property was accessed
         :param instance_type: The type of the instance object
@@ -157,8 +158,8 @@ class VersionedForwardManyToOneDescriptor(ForwardManyToOneDescriptor):
                             ", which is not a subclass of Versionable")
 
         if hasattr(instance, '_querytime'):
-            # If current_elt matches the instance's querytime, there's no need to
-            # make a database query.
+            # If current_elt matches the instance's querytime, there's no
+            # need to make a database query.
             if matches_querytime(current_elt, instance._querytime):
                 current_elt._querytime = instance._querytime
                 return current_elt

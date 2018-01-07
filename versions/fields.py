@@ -94,15 +94,15 @@ class VersionedForeignKey(ForeignKey):
         timestamp_q = None
         for lh_field, rh_field in self.related_fields:
             if isinstance(obj, Versionable) and \
-                            rh_field.attname == \
-                            Versionable.VERSION_IDENTIFIER_FIELD:
+                    rh_field.attname == \
+                    Versionable.VERSION_IDENTIFIER_FIELD:
                 base_filter.update(**{
                     Versionable.OBJECT_IDENTIFIER_FIELD:
                         getattr(obj, lh_field.attname)})
                 if hasattr(obj, 'as_of') and obj.as_of is not None:
                     start_date_q = Q(version_start_date__lt=obj.as_of)
-                    end_date_q = Q(version_end_date__gte=obj.as_of) | \
-                                 Q(version_end_date__isnull=True)
+                    end_date_q = Q(version_end_date__gte=obj.as_of) | Q(
+                        version_end_date__isnull=True)
                     timestamp_q = start_date_q & end_date_q
             else:
                 base_filter.update(
@@ -145,11 +145,9 @@ class VersionedManyToManyField(ManyToManyField):
             # class contribution
             self.set_attributes_from_name(name)
             self.model = cls
-            self.remote_field.through = \
-                VersionedManyToManyField \
-                .create_versioned_many_to_many_intermediary_model(self,
-                                                                  cls,
-                                                                  name)
+            self.remote_field.through = VersionedManyToManyField.\
+                create_versioned_many_to_many_intermediary_model(self, cls,
+                                                                 name)
         super(VersionedManyToManyField, self).contribute_to_class(cls, name)
 
         # Overwrite the descriptor
