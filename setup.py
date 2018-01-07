@@ -47,7 +47,6 @@ setup(name='CleanerVersion',
       license='Apache License 2.0',
       packages=find_packages(exclude=['cleanerversion.settings.*']),
       url='https://github.com/swisscom/cleanerversion',
-      install_requires=['django'],
       package_data={'versions': ['static/js/*.js',
                                  'templates/versions/*.html']},
       classifiers=[
