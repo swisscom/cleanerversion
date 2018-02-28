@@ -320,7 +320,7 @@ class VersionedAdmin(admin.ModelAdmin):
     identity_shortener.boolean = False
     identity_shortener.short_description = "Short Identity"
 
-    class Media():
+    class Media:
         # This supports dynamically adding 'Save without cloning' button:
         # http://bit.ly/1T2fGOP
         js = ('js/admin_addon.js',)
