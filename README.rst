@@ -8,8 +8,6 @@ CleanerVersion for Django
    :target: https://coveralls.io/r/swisscom/cleanerversion
 .. image:: https://img.shields.io/pypi/v/CleanerVersion.svg
    :target: https://pypi.python.org/pypi/CleanerVersion
-.. image:: https://img.shields.io/pypi/dw/CleanerVersion.svg
-   :target: https://pypi.python.org/pypi/CleanerVersion
 
 Abstract
 ========
@@ -49,14 +47,16 @@ Prerequisites
 This code was tested with the following technical components
 
 * Python 2.7 & 3.6
-* Django 1.9 - 1.11
+* Django 1.11 & 2.0
 * PostgreSQL 9.3.4 & SQLite3
 
 Older Django versions
 =====================
 CleanerVersion was originally written for Django 1.6 and has now been ported up to Django 1.11.
 
-CleanerVersion 2.x releases are compatible with Django 1.9, 1.10 and 1.11.
+CleanerVersion 2.x releases are compatible with Django 1.11 and 2.0. It may
+also work with Django 1.9 and 1.10, but note that these versions are not
+officially supported and test cases have been removed.
 
 Old packages compatible with older Django releases:
 
@@ -64,6 +64,7 @@ Old packages compatible with older Django releases:
 
 * Django 1.8: https://pypi.python.org/pypi/CleanerVersion/1.6.2
 
+* Django 1.9 & 1.10: https://pypi.python.org/pypi/CleanerVersion/2.0.0
 
 Documentation
 =============

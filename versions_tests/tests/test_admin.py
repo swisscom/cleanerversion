@@ -3,7 +3,7 @@ from django.contrib.auth.models import User
 from django.test import TestCase
 try:
     from django.urls import reverse
-except ModuleNotFoundError:
+except ImportError:
     # Supports backward compatibility with 1.9
     from django.core.urlresolvers import reverse
 

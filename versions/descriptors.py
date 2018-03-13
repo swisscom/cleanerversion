@@ -1,5 +1,6 @@
 from collections import namedtuple
 
+from django import VERSION
 from django.core.exceptions import SuspiciousOperation, FieldDoesNotExist
 from django.db import router, transaction
 from django.db.models.base import Model
@@ -93,7 +94,7 @@ class VersionedForwardManyToOneDescriptor(ForwardManyToOneDescriptor):
         # (related_name ends with a '+'). Refs #21410.
         # The check for len(...) == 1 is a special case that allows the query
         # to be join-less and smaller. Refs #21760.
-        if self.field.rel.is_hidden() or len(
+        if self.field.remote_field.is_hidden() or len(
                 self.field.foreign_related_fields) == 1:
             query = {'%s__in' % related_field.name: set(
                 instance_attr(inst)[0] for inst in instances)}
@@ -103,16 +104,22 @@ class VersionedForwardManyToOneDescriptor(ForwardManyToOneDescriptor):
 
         # Since we're going to assign directly in the cache,
         # we must manage the reverse relation cache manually.
-        if not self.field.rel.multiple:
-            rel_obj_cache_name = self.field.rel.get_cache_name()
+        if not self.field.remote_field.multiple:
+            rel_obj_cache_name = self.field.remote_field.get_cache_name()
             for rel_obj in queryset:
                 instance = instances_dict[rel_obj_attr(rel_obj)]
                 setattr(rel_obj, rel_obj_cache_name, instance)
-        return queryset, rel_obj_attr, instance_attr, True, self.cache_name
+
+        if VERSION[:1] < (2,):
+            return (queryset, rel_obj_attr, instance_attr, True,
+                    self.field.get_cache_name())
+        else:
+            return (queryset, rel_obj_attr, instance_attr, True,
+                    self.field.get_cache_name(), False)
 
     def get_queryset(self, **hints):
-        queryset = super(VersionedForwardManyToOneDescriptor,
-                         self).get_queryset(**hints)
+        queryset = self.field.remote_field.model.objects\
+            .db_manager(hints=hints).all()
         if hasattr(queryset, 'querytime'):
             if 'instance' in hints:
                 instance = hints['instance']
@@ -124,50 +131,47 @@ class VersionedForwardManyToOneDescriptor(ForwardManyToOneDescriptor):
                     queryset = queryset.as_of(None)
         return queryset
 
+    def __get__(self, instance, cls=None):
+        """
+        The getter method returns the object, which points instance,
+        e.g. choice.poll returns a Poll instance, whereas the Poll class
+        defines the ForeignKey.
+
+        :param instance: The object on which the property was accessed
+        :param instance_type: The type of the instance object
+        :return: Returns a Versionable
+        """
+        from versions.models import Versionable
+
+        if instance is None:
+            return self
+
+        current_elt = super(self.__class__, self).__get__(instance,
+                                                          cls)
+
+        if not current_elt:
+            return None
+
+        if not isinstance(current_elt, Versionable):
+            raise TypeError("VersionedForeignKey target is of type " +
+                            str(type(current_elt)) +
+                            ", which is not a subclass of Versionable")
+
+        if hasattr(instance, '_querytime'):
+            # If current_elt matches the instance's querytime, there's no
+            # need to make a database query.
+            if matches_querytime(current_elt, instance._querytime):
+                current_elt._querytime = instance._querytime
+                return current_elt
+
+            return current_elt.__class__.objects.as_of(
+                instance._querytime.time).get(identity=current_elt.identity)
+        else:
+            return current_elt.__class__.objects.current.get(
+                identity=current_elt.identity)
+
 
 vforward_many_to_one_descriptor_class = VersionedForwardManyToOneDescriptor
-
-
-def vforward_many_to_one_descriptor_getter(self, instance, instance_type=None):
-    """
-    The getter method returns the object, which points instance,
-    e.g. choice.poll returns a Poll instance, whereas the Poll class defines
-    the ForeignKey.
-
-    :param instance: The object on which the property was accessed
-    :param instance_type: The type of the instance object
-    :return: Returns a Versionable
-    """
-    from versions.models import Versionable
-    current_elt = super(self.__class__, self).__get__(instance, instance_type)
-
-    if instance is None:
-        return self
-
-    if not current_elt:
-        return None
-
-    if not isinstance(current_elt, Versionable):
-        raise TypeError("VersionedForeignKey target is of type " +
-                        str(type(current_elt)) +
-                        ", which is not a subclass of Versionable")
-
-    if hasattr(instance, '_querytime'):
-        # If current_elt matches the instance's querytime, there's no need to
-        # make a database query.
-        if matches_querytime(current_elt, instance._querytime):
-            current_elt._querytime = instance._querytime
-            return current_elt
-
-        return current_elt.__class__.objects.as_of(
-            instance._querytime.time).get(identity=current_elt.identity)
-    else:
-        return current_elt.__class__.objects.current.get(
-            identity=current_elt.identity)
-
-
-vforward_many_to_one_descriptor_class.__get__ = \
-    vforward_many_to_one_descriptor_getter
 
 
 class VersionedReverseManyToOneDescriptor(ReverseManyToOneDescriptor):
@@ -245,7 +249,13 @@ class VersionedReverseManyToOneDescriptor(ReverseManyToOneDescriptor):
                     instance = instances_dict[rel_obj_attr(rel_obj)]
                     setattr(rel_obj, rel_field.name, instance)
                 cache_name = rel_field.related_query_name()
-                return queryset, rel_obj_attr, instance_attr, False, cache_name
+
+                if VERSION[:1] < (2,):
+                    return (queryset, rel_obj_attr, instance_attr, False,
+                            cache_name)
+                else:
+                    return (queryset, rel_obj_attr, instance_attr, False,
+                            cache_name, False)
 
             def add(self, *objs, **kwargs):
                 from versions.models import Versionable
@@ -336,7 +346,7 @@ class VersionedManyToManyDescriptor(ManyToManyDescriptor):
                 "Related values can only be directly set on the current "
                 "version of an object")
 
-        if not self.field.rel.through._meta.auto_created:
+        if not self.field.remote_field.through._meta.auto_created:
             opts = self.field.rel.through._meta
             raise AttributeError((
                                      "Cannot set values on a ManyToManyField "

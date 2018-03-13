@@ -4,14 +4,18 @@ python:
   - "3.6"
 
 env:
-  - TOX_ENV=django19-pg
-  - TOX_ENV=django19-sqlite
-  - TOX_ENV=django110-pg
-  - TOX_ENV=django110-sqlite
   - TOX_ENV=django111-pg
   - TOX_ENV=django111-sqlite
+  - TOX_ENV=django20-pg
+  - TOX_ENV=django20-sqlite
   - TOX_ENV=pep8
 
+matrix:
+  exclude:
+  - python: "2.7"
+    env: TOX_ENV=django20-pg
+  - python: "2.7"
+    env: TOX_ENV=django20-sqlite
 
 # Enable PostgreSQL usage
 addons:

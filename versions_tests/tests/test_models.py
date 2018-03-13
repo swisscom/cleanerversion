@@ -302,7 +302,7 @@ class DeletionHandlerTest(TestCase):
                          City.objects.current.filter(pk=self.city.pk).count())
 
     def test_deleting_when_m2m_history(self):
-        through = Award._meta.get_field('players').rel.through
+        through = Award._meta.get_field('players').remote_field.through
         a1 = Award.objects.create(name="bravo")
         p1 = Player.objects.create(name="Jessie")
         a1.players = [p1]
@@ -2141,7 +2141,7 @@ class ReverseForeignKeyDirectAssignmentTests(TestCase):
 
         self.t2 = get_utc_now()
         self.c1 = self.c1.clone()
-        self.c1.team_set = []
+        self.c1.team_set.set([])
 
         self.team10 = Team.objects.current.get(
             identity=self.team10.identity).clone()
@@ -3070,7 +3070,8 @@ class VersionRestoreTest(TestCase):
         self.assertEqual(3,
                          Player.objects.filter(identity=p1.identity).count())
         self.assertEqual(1, Player.objects.filter(name='p2.v1').count())
-        m2m_manager = Award._meta.get_field('players').rel.through.objects
+        m2m_manager = \
+            Award._meta.get_field('players').remote_field.through.objects
         self.assertEqual(1, m2m_manager.all().count())
 
     def test_restore_two_in_memory_objects(self):

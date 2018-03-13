@@ -7,7 +7,8 @@ but usually you only need to do the following steps to publish a new package
 version to PyPI::
 
     # Update the version tag in this file (setup.py)
-    python setup.py sdist --formats=gztar,zip
+    python setup.py sdist --formats=gztar
+    python setup.py bdist_wheel
     twine upload dist/*
 
 That's already it. You should get the following output written to your
@@ -46,7 +47,6 @@ setup(name='CleanerVersion',
       license='Apache License 2.0',
       packages=find_packages(exclude=['cleanerversion.settings.*']),
       url='https://github.com/swisscom/cleanerversion',
-      install_requires=['django'],
       package_data={'versions': ['static/js/*.js',
                                  'templates/versions/*.html']},
       classifiers=[

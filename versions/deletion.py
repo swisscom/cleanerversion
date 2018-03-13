@@ -1,5 +1,5 @@
 from django.db.models.deletion import (
-    attrgetter, signals, six, sql, transaction,
+    attrgetter, signals, sql, transaction,
     CASCADE,
     Collector,
 )
@@ -64,11 +64,10 @@ class VersionedCollector(Collector):
                                    "they are not safe for Versionables")
 
             # update fields
-            for model, instances_for_fieldvalues in six.iteritems(
-                    self.field_updates):
+            for model, instances_for_fieldvalues in self.field_updates.items():
                 id_map = {}
-                for (field, value), instances in six.iteritems(
-                        instances_for_fieldvalues):
+                for (field, value), instances in \
+                        instances_for_fieldvalues.items():
                     if self.is_versionable(model):
                         # Do not set the foreign key to null, which can be the
                         # behaviour (depending on DB backend) for the default
@@ -79,7 +78,7 @@ class VersionedCollector(Collector):
                         if not (isinstance(
                                     field,
                                     versions.fields.VersionedForeignKey) and
-                                field.rel.on_delete == CASCADE):
+                                field.remote_field.on_delete == CASCADE):
                             for instance in instances:
                                 # Clone before updating
                                 cloned = id_map.get(instance.pk, None)
@@ -100,18 +99,18 @@ class VersionedCollector(Collector):
                         self.data[model][index] = cloned
 
                 query = sql.UpdateQuery(model)
-                for (field, value), instances in six.iteritems(
-                        instances_for_fieldvalues):
+                for (field, value), instances in \
+                        instances_for_fieldvalues.items():
                     if instances:
                         query.update_batch([obj.pk for obj in instances],
                                            {field.name: value}, self.using)
 
             # reverse instance collections
-            for instances in six.itervalues(self.data):
+            for instances in self.data.values():
                 instances.reverse()
 
             # delete instances
-            for model, instances in six.iteritems(self.data):
+            for model, instances in self.data.items():
                 if self.is_versionable(model):
                     for instance in instances:
                         self.versionable_delete(instance, timestamp)
@@ -131,17 +130,15 @@ class VersionedCollector(Collector):
                             )
 
         # update collected instances
-        for model, instances_for_fieldvalues in six.iteritems(
-                self.field_updates):
-            for (field, value), instances in six.iteritems(
-                    instances_for_fieldvalues):
+        for model, instances_for_fieldvalues in self.field_updates.items():
+            for (field, value), instances in instances_for_fieldvalues.items():
                 for obj in instances:
                     setattr(obj, field.attname, value)
 
         # Do not set Versionable object ids to None, since they still do have
         # an id.
         # Instead, set their version_end_date.
-        for model, instances in six.iteritems(self.data):
+        for model, instances in self.data.items():
             is_versionable = self.is_versionable(model)
             for instance in instances:
                 if is_versionable:
@@ -157,10 +154,11 @@ class VersionedCollector(Collector):
         from versions.models import Versionable
 
         related_model = related.related_model
-        manager = related_model._base_manager
         if issubclass(related_model, Versionable):
-            manager = manager.current
-        return manager.using(self.using).filter(
+            qs = related_model.objects.current
+        else:
+            qs = related_model._base_manager.all()
+        return qs.using(self.using).filter(
             **{"%s__in" % related.field.name: objs}
         )
 
