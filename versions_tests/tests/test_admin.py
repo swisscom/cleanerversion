@@ -1,5 +1,5 @@
 from django.contrib.admin.sites import AdminSite
-from django.contrib.auth.models import User
+from django.contrib.auth import get_user_model
 from django.test import TestCase
 try:
     from django.urls import reverse
@@ -9,6 +9,8 @@ except ImportError:
 
 from versions.admin import VersionedAdmin
 from ..models import City
+
+User = get_user_model()
 
 
 class VersionedAdminTest(TestCase):
