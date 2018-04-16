@@ -422,7 +422,7 @@ passing the object itself::
     >> stb5 = SportsClub.objects.as_of(t1).filter(discipline_id=running.id, name='STB').first()
     >> stb6 = SportsClub.objects.as_of(t1).filter(discipline_id=running_at_t1.id, name='STB').first()
     >> (stb5.discipline.id, stb6 is None)
-    (True, 2)
+    (2, True)
 
     >> stb7 = SportsClub.objects.current.filter(discipline_id=running.id, name='STB').first()
     >> stb8 = SportsClub.objects.current.filter(discipline_id=running_at_t1.id, name='STB').first()
