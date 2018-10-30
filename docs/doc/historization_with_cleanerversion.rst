@@ -14,7 +14,7 @@ Installation
 ------------
 
 If you don't like to work with the sources directly, you can also install the `CleanerVersion package from PyPI
-<https://pypi.python.org/pypi/CleanerVersion>`_ by doing so (you may need superuser privileges, as for every other
+<https://pypi.org/project/CleanerVersion/>`_ by doing so (you may need superuser privileges, as for every other
 pip-installation)::
 
     pip install cleanerversion
@@ -92,7 +92,8 @@ relationship part, rather than the semantical correctness of the entries' fields
     from datetime import datetime
     from django.db.models.fields import CharField
     from django.utils.timezone import utc
-    from versions.models import Versionable, VersionedManyToManyField, VersionedForeignKey
+    from versions.models import Versionable
+    from versions.fields import VersionedManyToManyField, VersionedForeignKey
 
     class Discipline(Versionable):
         """A sports discipline"""
@@ -521,7 +522,8 @@ Versioning an object in a ManyToMany relationship requires 3 steps to be done, i
 The records in ManyToMany intermediary tables are versioned: they have ``version_birth_date``,
 ``version_start_date`` and ``version_end_date`` columns.  The ForeignKey columns in ManyToMany
 Intermediary tables store the ``id`` of the referenced records.  Note that this is different than
-the VersionedForeignKeys in Versionable models, which store the ``identity`` of the referenced objects.
+the VersionedForeignKeys in Versionable model instances, which store the ``identity`` of the 
+referenced objects.
 This is transparent in normal usage, but can be important to keep in mind when you need to write a query
 that directly references the ForeignKey columns.
 
