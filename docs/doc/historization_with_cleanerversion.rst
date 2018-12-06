@@ -18,6 +18,15 @@ If you don't like to work with the sources directly, you can also install the `C
 pip-installation)::
 
     pip install cleanerversion
+    
+Afterwards, add `versions` to your INSTALLED_APPS
+
+    INSTALLED_APPS = (
+        ...
+        'versions',
+        ...
+    )
+
 
 If you want to check whether your components are compatible with CleanerVersion, you can run the unit tests coming
 with CleanerVersion. To do so, register the CleanerVersion test app to the ``INSTALLED_APPS`` variable
