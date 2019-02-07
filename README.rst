@@ -1,3 +1,7 @@
+.. note::  Please note that development of CleanerVersion has been
+           **discontinued as of February 2019**. Feel free to fork the
+           repository.
+
 *************************
 CleanerVersion for Django
 *************************
